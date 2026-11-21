@@ -56,7 +56,7 @@ This repository contains the **backend REST API** developed with **NestJS**, **T
 
 ### Planned Features (Upcoming in Project Roadmap)
 
-- Price offer browsing, editing, withdrawal, and expiry handling
+- Price offer details, editing, withdrawal, and automatic expiry transitions
 - Procurement Orders & State Machine (`OrdersModule` — Step 11)
 - Payment Tracking Records (`PaymentsModule` — Step 12)
 - Platform Administrative Dashboard (`AdminModule` — Step 13)
@@ -370,6 +370,17 @@ http://localhost:5001/api
 
 ---
 
+#### 7. Price Offers (`/offers`)
+
+| Method | Endpoint | Description | Authentication | Required Role |
+|---|---|---|---|---|
+| `GET` | `/offers` | Browse active offers through their expiry date in Bangladesh | Bearer JWT | Any |
+| `POST` | `/offers` | Publish a buying offer | Bearer JWT | Verified `FACTORY` |
+
+Use `teaGrade` for an exact, case-insensitive match and `minPrice` or `maxPrice` for inclusive BDT price bounds. Set `sortBy` to `pricePerKg`, `validUntil`, `minimumQuantityKg`, or `createdAt`, with `sortOrder` set to `ASC` or `DESC`. The default is `pricePerKg DESC`.
+
+`page` starts at 1. `limit` defaults to 20 and accepts up to 100. The response contains `data`, `total`, `page`, `limit`, and `totalPages`. Each offer includes only the factory profile ID, name, and district. See the [API design](docs/api-design.md#92-get-all-active-offers) for an example response.
+
 ## 🔒 Authentication and Authorization
 
 ### Registration Flow
@@ -409,7 +420,7 @@ ChaBondhu uses role-based access control with three roles:
 | **Farmer Profiles** | ✅ Complete | 1:1 garden profile linked to growers, ownership verification |
 | **Factory Profiles** | ✅ Complete | 1:1 factory profile linked to factories, admin verification audit |
 | **Harvest Listings** | ✅ Complete | Marketplace CRUD, filtering, pagination, lifecycle management |
-| **Price Offers** | 🔄 Partial | Verified factories can publish offers. Browsing, editing, withdrawal, and expiry handling are planned. |
+| **Price Offers** | 🔄 Partial | Verified factories can publish, and signed-in users can browse active offers. Offer details, editing, withdrawal, and automatic expiry transitions are planned. |
 | **Procurement Orders** | ⏳ Planned | Order placement and state machine (`OrdersModule` — Step 11) |
 | **Payment Records** | ⏳ Planned | Procurement payment tracking (`PaymentsModule` — Step 12) |
 | **Admin** | 🔄 Partial | Factory verification and decision history are available. Broader dashboard and account moderation remain planned. |

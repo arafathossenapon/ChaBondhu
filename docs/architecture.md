@@ -586,7 +586,7 @@ This serves as the primary tool for testing the API during development, alongsid
 | `FarmerProfilesModule` | `FarmerProfile` | `POST`, `GET /me`, `GET /:id`, `PATCH /me` | CRUD; enforce one-per-user |
 | `ListingsModule` | `HarvestListing` | `POST`, `GET /`, `GET /my`, `GET /:id`, `PATCH /:id`, `PATCH /:id/cancel`, `DELETE /:id` | CRUD; ownership check; cancellation guard |
 | `FactoryProfilesModule` | `FactoryProfile` | `POST`, `GET /me`, `GET /:id`, `PATCH /me` | CRUD; enforce one-per-user |
-| `OffersModule` | `PriceOffer` | Implemented `POST /offers`. Planned `GET /offers`, `GET /offers/my`, `GET /offers/:id`, `PATCH /offers/:id`, `PATCH /offers/:id/withdraw` | Publishing reuses factory verification and assigns ownership from the authenticated account |
+| `OffersModule` | `PriceOffer` | Implemented `POST /offers` and `GET /offers`. Planned `GET /offers/my`, `GET /offers/:id`, `PATCH /offers/:id`, `PATCH /offers/:id/withdraw` | Publishing checks factory verification. Browsing filters active offers by expiry and projects public factory details. |
 | `OrdersModule` | `Order` | `POST`, `GET /my`, `GET /:id`, `PATCH /:id/status`, `PATCH /:id/payment-status` | Order creation; state machine; price copying; authorization |
 | `PaymentsModule` | `Payment` | `GET /order/:orderId` | Retrieve payment record; calculate total |
 | `AdminModule` | — | `/admin/users/*`, `/admin/listings`, `/admin/orders` | Cross-module admin queries; verification; deactivation |

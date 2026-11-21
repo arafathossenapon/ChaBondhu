@@ -808,19 +808,23 @@ The server sets `factoryProfileId` from the signed-in account. The DTO accepts t
 | Property | Value |
 |---|---|
 | Auth | Any Auth |
-| Description | Browse all currently active price offers (price comparison view for farmers) |
+| Description | Browse `ACTIVE` price offers through their `validUntil` date in Bangladesh |
 
 **Query Parameters (optional):**
 
 | Param | Type | Description |
 |---|---|---|
-| `teaGrade` | string | Filter by tea grade |
-| `minPrice` | number | Minimum price per kg |
-| `maxPrice` | number | Maximum price per kg |
-| `sortBy` | string | `pricePerKg`, `validUntil`, `minimumQuantityKg` |
-| `sortOrder` | string | `ASC` or `DESC` (default: `DESC` for price) |
-| `page` | number | Page number (default: 1) |
-| `limit` | number | Items per page (default: 20) |
+| `teaGrade` | string | Case-insensitive exact match after trimming |
+| `minPrice` | number | Inclusive lower bound in BDT per kg, non-negative with up to 2 decimal places |
+| `maxPrice` | number | Inclusive upper bound in BDT per kg, non-negative with up to 2 decimal places |
+| `sortBy` | string | `pricePerKg` (default), `validUntil`, `minimumQuantityKg`, or `createdAt` |
+| `sortOrder` | string | `ASC` or `DESC` (default). Use `createdAt` for oldest or newest first. |
+| `page` | integer | Current page, starting at 1. Default is 1. |
+| `limit` | integer | Items per page from 1 to 100. Default is 20. |
+
+Example request `GET /offers?teaGrade=CTC&minPrice=20&maxPrice=30&sortBy=pricePerKg&sortOrder=DESC&page=1&limit=20`.
+
+Ties are ordered by offer ID in the same direction. Offers with no minimum quantity sort last when ordering by minimum quantity. The response gives the total number of matches and total pages before pagination. An out-of-range page returns an empty `data` array with the same totals.
 
 **Success Response — `200 OK`:**
 
@@ -830,11 +834,11 @@ The server sets `factoryProfileId` from the signed-in account. The DTO accepts t
     {
       "id": 5,
       "teaGrade": "CTC",
-      "pricePerKg": "28.50",
+      "pricePerKg": 28.50,
       "qualityRequirements": "Fresh, moisture below 70%.",
-      "minimumQuantityKg": "100.000",
+      "minimumQuantityKg": 100,
       "validUntil": "2026-12-31",
-      "estimatedTransportCostBdt": "500.00",
+      "estimatedTransportCostBdt": 500,
       "status": "ACTIVE",
       "factoryProfile": {
         "id": 2,
@@ -844,9 +848,10 @@ The server sets `factoryProfileId` from the signed-in account. The DTO accepts t
       "createdAt": "2026-11-05T10:00:00.000Z"
     }
   ],
-  "total": 12,
+  "total": 1,
   "page": 1,
-  "limit": 20
+  "limit": 20,
+  "totalPages": 1
 }
 ```
 
@@ -854,6 +859,7 @@ The server sets `factoryProfileId` from the signed-in account. The DTO accepts t
 
 | Status | Condition |
 |---|---|
+| `400 Bad Request` | Invalid or unknown query field, or `minPrice` greater than `maxPrice` |
 | `401 Unauthorized` | No token |
 
 ---
