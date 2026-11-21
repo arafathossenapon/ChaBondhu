@@ -41,7 +41,7 @@ This repository contains the **backend REST API** developed with **NestJS**, **T
   - Private owner management (`/farmer-profiles/me`) and public marketplace view (`/farmer-profiles/:id`).
 - **Tea Factory Profiles:**
   - One-to-one factory profile per factory representative (`FactoryProfile`).
-  - Tracks factory name, representative name, district, upazila, full address, and admin verification status (`isVerified`, `verifiedAt`, `verifiedByAdminId`).
+  - Tracks factory details and verification status (`PENDING`, `VERIFIED`, or `REJECTED`). Admins can review, approve, and reject pending profiles. Factory owners can see their review history and resubmit after rejection.
 - **Harvest Listings Marketplace:**
   - Tea leaf harvest listings published exclusively by verified farm owners (`HarvestListing`).
   - Tracks tea grade (e.g., CTC, Green Leaf), estimated quantity in kg (`NUMERIC(10, 3)` with database check constraint `> 0`), expected harvest date, optional last harvest date, leaf quality description, collection location, notes, and lifecycle status.
@@ -56,7 +56,7 @@ This repository contains the **backend REST API** developed with **NestJS**, **T
 
 ### Planned Features (Upcoming in Project Roadmap)
 
-- Factory Price Offers (`OffersModule` — Step 10)
+- Price offer browsing, editing, withdrawal, and expiry handling
 - Procurement Orders & State Machine (`OrdersModule` — Step 11)
 - Payment Tracking Records (`PaymentsModule` — Step 12)
 - Platform Administrative Dashboard (`AdminModule` — Step 13)
@@ -145,7 +145,7 @@ cd ChaBondhu/nest-boilerplate
 Install all project dependencies using `pnpm`:
 
 ```bash
-pnpm install
+pnpm install --frozen-lockfile
 ```
 
 ### 3. Create the PostgreSQL Database
@@ -225,6 +225,8 @@ All tables and columns use PostgreSQL `snake_case` through a custom `SnakeNaming
 Located in `src/database/migrations/`:
 1. `1793882640314-CreateUsersAndProfiles.ts` — Creates `users`, `farmer_profiles`, and `factory_profiles` tables with foreign keys and unique constraints.
 2. `1793884438520-CreateHarvestListings.ts` — Creates `harvest_listings` table with check constraints (`estimated_quantity_kg > 0`) and indexes.
+3. `1795300000000-TrackFactoryVerificationReviews.ts` — Converts existing verification flags to statuses and adds decision history. Existing approvals keep their status and known approval details.
+4. `1795300100000-CreatePriceOffers.ts` — Creates `price_offers` with a factory profile foreign key and checks for numeric values and status.
 
 ### Migration Commands
 
@@ -260,9 +262,48 @@ pnpm run lint
 # Format code with Prettier
 pnpm run format
 
-# Run tests
-pnpm run test
+# Run HTTP integration tests after building
+pnpm run test:e2e --runInBand
 ```
+
+The integration suite uses the PostgreSQL connection configured in `.env`. The database user needs permission to create a schema in that database. Fixtures and schema setup run in one transaction and are rolled back after the suite.
+
+টেস্টগুলো আলাদা স্কিমায় চলে। শেষে রোলব্যাক হয়, তাই আগের ডেটা ও মাইগ্রেশন ইতিহাস অক্ষত থাকে।
+
+### Factory verification
+
+Provision the first development admin from the backend directory after running the migrations. In PowerShell, enter the contact details and password at the prompts. Use a unique email address and a password of at least eight characters.
+
+```powershell
+$env:NODE_ENV = 'development'
+$env:CHABONDHU_ADMIN_EMAIL = Read-Host 'Admin email'
+$env:CHABONDHU_ADMIN_NAME = Read-Host 'Admin full name'
+$env:CHABONDHU_ADMIN_PHONE = Read-Host 'Admin phone'
+$adminPasswordInput = Read-Host 'Admin password' -AsSecureString
+try {
+    $env:CHABONDHU_ADMIN_PASSWORD = [System.Net.NetworkCredential]::new('', $adminPasswordInput).Password
+    pnpm run admin:provision:dev
+} finally {
+    Clear-Item Env:CHABONDHU_ADMIN_PASSWORD
+    $adminPasswordInput.Dispose()
+}
+```
+
+The command uses the database configured in `.env`, hashes the password with Argon2, and exits safely if an active admin already exists. It leaves existing accounts untouched. Sign in through `POST /auth/login` using the email in lowercase.
+
+| Method and endpoint | Role | Action |
+|---|---|---|
+| `GET /admin/users/:id/factory-verification` | `ADMIN` | Review a profile and its decision history by the factory's user ID |
+| `PATCH /admin/users/:id/verify` | `ADMIN` | Approve a pending profile |
+| `PATCH /admin/users/:id/reject-verification` | `ADMIN` | Reject a pending profile with a JSON body containing `reason` |
+| `GET /factory-profiles/me/verification-history` | `FACTORY` | View your factory's decisions and rejection reasons |
+| `PATCH /factory-profiles/me/resubmit-verification` | `FACTORY` | Return your rejected profile to pending review |
+
+Use a signed-in admin account to review pending factories. Signed-in profile readers see the current verification status. Only the factory owner and admins can read the decision history.
+
+### Publish a price offer
+
+A signed-in factory with a verified profile can use `POST /offers` to create an `ACTIVE` buying offer. Send `teaGrade`, `pricePerKg` in BDT, and `validUntil` as a date after today in Bangladesh. Optional fields are `qualityRequirements`, `minimumQuantityKg`, `estimatedTransportCostBdt` as a flat cost, and `notes`. The server uses the signed-in factory profile as the offer owner.
 
 ---
 
@@ -368,10 +409,10 @@ ChaBondhu uses role-based access control with three roles:
 | **Farmer Profiles** | ✅ Complete | 1:1 garden profile linked to growers, ownership verification |
 | **Factory Profiles** | ✅ Complete | 1:1 factory profile linked to factories, admin verification audit |
 | **Harvest Listings** | ✅ Complete | Marketplace CRUD, filtering, pagination, lifecycle management |
-| **Price Offers** | ⏳ Planned | Factory price publishing (`OffersModule` — Step 10) |
+| **Price Offers** | 🔄 Partial | Verified factories can publish offers. Browsing, editing, withdrawal, and expiry handling are planned. |
 | **Procurement Orders** | ⏳ Planned | Order placement and state machine (`OrdersModule` — Step 11) |
 | **Payment Records** | ⏳ Planned | Procurement payment tracking (`PaymentsModule` — Step 12) |
-| **Admin Dashboard** | ⏳ Planned | Factory approval workflow (`AdminModule` — Step 13) |
+| **Admin** | 🔄 Partial | Factory verification and decision history are available. Broader dashboard and account moderation remain planned. |
 
 ---
 

@@ -15,6 +15,7 @@ import {
   ApiBearerAuth,
 } from "@nestjs/swagger";
 import { FactoryProfilesService } from "./factory-profiles.service";
+import { FactoryVerificationService } from "./factory-verification.service";
 import { CreateFactoryProfileDto } from "./dto/create-factory-profile.dto";
 import { UpdateFactoryProfileDto } from "./dto/update-factory-profile.dto";
 import { JwtGuard } from "@/common/guard/jwt.guard";
@@ -30,6 +31,7 @@ import { AuthUser } from "@/common/interfaces/auth-user.interface";
 export class FactoryProfilesController {
   constructor(
     private readonly factoryProfilesService: FactoryProfilesService,
+    private readonly verification: FactoryVerificationService,
   ) {}
 
   @Post()
@@ -58,6 +60,23 @@ export class FactoryProfilesController {
   @ApiResponse({ status: 404, description: "Not Found - factory profile not created yet" })
   async getOwnProfile(@CurrentUser() user: AuthUser) {
     return this.factoryProfilesService.getOwnProfile(user.id);
+  }
+
+  @Get("me/verification-history")
+  @UseGuards(JwtGuard, RolesGuard)
+  @Roles(Role.FACTORY)
+  @ApiOperation({ summary: "Get the signed-in factory's verification history" })
+  getOwnReviews(@CurrentUser() actor: AuthUser) {
+    return this.verification.getOwnReviews(actor);
+  }
+
+  @Patch("me/resubmit-verification")
+  @UseGuards(JwtGuard, RolesGuard)
+  @Roles(Role.FACTORY)
+  @ApiOperation({ summary: "Resubmit the signed-in factory's rejected verification" })
+  @ApiResponse({ status: 409, description: "Verification is not rejected" })
+  resubmit(@CurrentUser() actor: AuthUser) {
+    return this.verification.resubmit(actor);
   }
 
   @Get(":id")

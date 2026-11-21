@@ -9,6 +9,7 @@ import { AuthModule } from "@/modules/auth/auth.module";
 import { FarmerProfilesModule } from "@/modules/farmer-profiles/farmer-profiles.module";
 import { FactoryProfilesModule } from "@/modules/factory-profiles/factory-profiles.module";
 import { ListingsModule } from "@/modules/listings/listings.module";
+import { OffersModule } from "@/modules/offers/offers.module";
 
 @Module({
   imports: [
@@ -22,6 +23,7 @@ import { ListingsModule } from "@/modules/listings/listings.module";
     FarmerProfilesModule,
     FactoryProfilesModule,
     ListingsModule,
+    OffersModule,
   ],
   controllers: [AppController],
   providers: [AppService],

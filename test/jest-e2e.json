@@ -1,0 +1,6 @@
+{
+  "rootDir": "..",
+  "testEnvironment": "node",
+  "testMatch": ["<rootDir>/test/**/*.e2e-spec.cjs"],
+  "testTimeout": 15000
+}
