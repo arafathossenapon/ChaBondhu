@@ -40,7 +40,6 @@ export class FactoryProfilesService {
     const profile = this.factoryProfileRepository.create({
       ...createDto,
       userId,
-      isVerified: false,
     });
 
     return this.factoryProfileRepository.save(profile);
@@ -74,25 +73,12 @@ export class FactoryProfilesService {
     userId: number,
     updateDto: UpdateFactoryProfileDto,
   ): Promise<FactoryProfile> {
-    const profile = await this.getOwnProfile(userId);
-
-    if (updateDto.factoryName !== undefined) {
-      profile.factoryName = updateDto.factoryName;
+    const { factoryName, representativeName, district, upazila, address } = updateDto;
+    const changes = { factoryName, representativeName, district, upazila, address };
+    if (Object.values(changes).some((value) => value !== undefined)) {
+      // শুধু প্রোফাইলের তথ্য বদলায়, একই সময়ে অ্যাডমিনের সিদ্ধান্ত বদলায় না।
+      await this.factoryProfileRepository.update({ userId }, changes);
     }
-    if (updateDto.representativeName !== undefined) {
-      profile.representativeName = updateDto.representativeName;
-    }
-    if (updateDto.district !== undefined) {
-      profile.district = updateDto.district;
-    }
-    if (updateDto.upazila !== undefined) {
-      profile.upazila = updateDto.upazila;
-    }
-    if (updateDto.address !== undefined) {
-      profile.address = updateDto.address;
-    }
-
-    // Notice: isVerified, verifiedAt, verifiedByAdminId are strictly untouched.
-    return this.factoryProfileRepository.save(profile);
+    return this.getOwnProfile(userId);
   }
 }

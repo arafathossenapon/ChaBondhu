@@ -5,13 +5,19 @@ import {
   CreateDateColumn,
   UpdateDateColumn,
   Index,
+  Check,
   OneToOne,
   ManyToOne,
   JoinColumn,
 } from "typeorm";
 import { User } from "@/modules/users/entities/user.entity";
+import { FactoryVerificationStatus } from "@/common/enums/factory-verification-status.enum";
 
 @Entity("factory_profiles")
+@Check(
+  "CHK_factory_verification_status",
+  "verification_status IN ('PENDING', 'VERIFIED', 'REJECTED')",
+)
 export class FactoryProfile {
   @PrimaryGeneratedColumn()
   id!: number;
@@ -40,9 +46,21 @@ export class FactoryProfile {
   @Column({ type: "text", nullable: true })
   address?: string | null;
 
-  @Index()
-  @Column({ type: "boolean", default: false })
-  isVerified!: boolean;
+  @Index("IDX_factory_verification_status")
+  @Column({
+    type: "varchar",
+    length: 20,
+    default: FactoryVerificationStatus.PENDING,
+  })
+  verificationStatus!: FactoryVerificationStatus;
+
+  get isVerified(): boolean {
+    return this.verificationStatus === FactoryVerificationStatus.VERIFIED;
+  }
+
+  toJSON() {
+    return { ...this, isVerified: this.isVerified };
+  }
 
   @Column({ type: "timestamptz", nullable: true })
   verifiedAt?: Date | null;
