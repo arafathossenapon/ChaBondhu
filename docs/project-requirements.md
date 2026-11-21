@@ -239,7 +239,7 @@ A factory may publish price offers for tea leaves they wish to purchase.
 
 **Business rules:**
 - Only verified factory accounts may publish price offers.
-- A factory may update or withdraw their own offers at any time.
+- A verified factory can edit its own active, unexpired offers. An owning factory can withdraw an active, unexpired offer. Expired and withdrawn offers are final.
 - Updating a price offer does not affect any orders already placed against that offer — the agreed price at order time is preserved.
 - Expired offers (past their `valid until` date) must automatically show as `EXPIRED` and not appear in active listings.
 

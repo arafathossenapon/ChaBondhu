@@ -1,15 +1,18 @@
 import {
   BadRequestException,
+  ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
-import { Repository, SelectQueryBuilder } from "typeorm";
+import { LessThan, Repository, SelectQueryBuilder } from "typeorm";
 import { AuthUser } from "@/common/interfaces/auth-user.interface";
 import { OfferStatus } from "@/common/enums/offer-status.enum";
 import { FactoryVerificationService } from "@/modules/factory-profiles/factory-verification.service";
 import { FactoryProfilesService } from "@/modules/factory-profiles/factory-profiles.service";
 import { CreatePriceOfferDto } from "./dto/create-price-offer.dto";
+import { UpdatePriceOfferDto } from "./dto/update-price-offer.dto";
 import { QueryPriceOffersDto } from "./dto/query-price-offers.dto";
 import { QueryOwnPriceOffersDto } from "./dto/query-own-price-offers.dto";
 import { PriceOffer } from "./entities/price-offer.entity";
@@ -169,5 +172,71 @@ export class OffersService {
         status: OfferStatus.ACTIVE,
       }),
     );
+  }
+
+  async update(
+    actor: AuthUser,
+    id: number,
+    changes: UpdatePriceOfferDto,
+  ): Promise<PriceOffer> {
+    const factory = await this.verification.requireVerifiedFactory(actor);
+    return this.changeActiveOffer(id, factory.id, changes);
+  }
+
+  async withdraw(actor: AuthUser, id: number): Promise<PriceOffer> {
+    const factory = await this.factoryProfiles.getOwnProfile(actor.id);
+    return this.changeActiveOffer(id, factory.id, {
+      status: OfferStatus.WITHDRAWN,
+    });
+  }
+
+  async expireOffers(now = new Date()): Promise<number> {
+    // শুধু মেয়াদ পেরোনো সক্রিয় অফার বদলায়। একই কাজ আবার চালালেও আগের সিদ্ধান্ত বদলায় না।
+    const result = await this.offers.update(
+      {
+        status: OfferStatus.ACTIVE,
+        validUntil: LessThan(bangladeshDate.format(now)),
+      },
+      { status: OfferStatus.EXPIRED },
+    );
+    return result.affected ?? 0;
+  }
+
+  private async changeActiveOffer(
+    id: number,
+    factoryProfileId: number,
+    changes: UpdatePriceOfferDto | { status: OfferStatus.WITHDRAWN },
+  ): Promise<PriceOffer> {
+    if (id < 1 || id > 2147483647) {
+      throw new NotFoundException("Offer not found");
+    }
+    return this.offers.manager.transaction(async (manager) => {
+      const repository = manager.getRepository(PriceOffer);
+      // লক নেওয়ার পরে অবস্থা ও তারিখ দেখি, যাতে মেয়াদ শেষ হওয়া বা প্রত্যাহারের সঙ্গে সংঘর্ষ না হয়।
+      const offer = await repository.findOne({
+        where: { id },
+        lock: { mode: "pessimistic_write" },
+      });
+      if (!offer) throw new NotFoundException("Offer not found");
+      if (offer.factoryProfileId !== factoryProfileId) {
+        throw new ForbiddenException("You do not own this offer");
+      }
+      const today = bangladeshDate.format(new Date());
+      if (offer.status !== OfferStatus.ACTIVE || offer.validUntil < today) {
+        throw new ConflictException(
+          "Only active, unexpired offers can be changed",
+        );
+      }
+      if (
+        "validUntil" in changes &&
+        changes.validUntil !== undefined &&
+        changes.validUntil <= today
+      ) {
+        throw new BadRequestException(
+          "validUntil must be after today in Bangladesh",
+        );
+      }
+      return repository.save(repository.merge(offer, changes));
+    });
   }
 }

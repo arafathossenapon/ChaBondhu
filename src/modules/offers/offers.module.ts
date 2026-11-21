@@ -4,10 +4,11 @@ import { FactoryProfilesModule } from "@/modules/factory-profiles/factory-profil
 import { PriceOffer } from "./entities/price-offer.entity";
 import { OffersController } from "./offers.controller";
 import { OffersService } from "./offers.service";
+import { OfferExpiryJob } from "./offer-expiry.job";
 
 @Module({
   imports: [TypeOrmModule.forFeature([PriceOffer]), FactoryProfilesModule],
   controllers: [OffersController],
-  providers: [OffersService],
+  providers: [OffersService, OfferExpiryJob],
 })
 export class OffersModule {}

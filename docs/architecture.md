@@ -586,7 +586,7 @@ This serves as the primary tool for testing the API during development, alongsid
 | `FarmerProfilesModule` | `FarmerProfile` | `POST`, `GET /me`, `GET /:id`, `PATCH /me` | CRUD; enforce one-per-user |
 | `ListingsModule` | `HarvestListing` | `POST`, `GET /`, `GET /my`, `GET /:id`, `PATCH /:id`, `PATCH /:id/cancel`, `DELETE /:id` | CRUD; ownership check; cancellation guard |
 | `FactoryProfilesModule` | `FactoryProfile` | `POST`, `GET /me`, `GET /:id`, `PATCH /me` | CRUD; enforce one-per-user |
-| `OffersModule` | `PriceOffer` | Implemented `POST /offers`, `GET /offers`, `GET /offers/my`, and `GET /offers/:id`. Planned `PATCH /offers/:id` and `PATCH /offers/:id/withdraw`. | Publishing checks factory verification. Browse and detail share the active-offer rule and public fields. The owner list uses the authenticated factory profile. |
+| `OffersModule` | `PriceOffer` | `POST /offers`, `GET /offers`, `GET /offers/my`, `GET /offers/:id`, `PATCH /offers/:id`, `PATCH /offers/:id/withdraw` | Publishing and editing check factory verification. Owner writes lock the offer before checking its state. Public reads apply the expiry cutoff, and an in-process job persists expiry at startup and every minute. |
 | `OrdersModule` | `Order` | `POST`, `GET /my`, `GET /:id`, `PATCH /:id/status`, `PATCH /:id/payment-status` | Order creation; state machine; price copying; authorization |
 | `PaymentsModule` | `Payment` | `GET /order/:orderId` | Retrieve payment record; calculate total |
 | `AdminModule` | — | `/admin/users/*`, `/admin/listings`, `/admin/orders` | Cross-module admin queries; verification; deactivation |
