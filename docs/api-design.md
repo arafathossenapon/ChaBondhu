@@ -871,16 +871,36 @@ Ties are ordered by offer ID in the same direction. Offers with no minimum quant
 | Property | Value |
 |---|---|
 | Auth | Any Auth |
-| Description | Get full details of a specific price offer |
+| Description | Get one `ACTIVE` offer through its `validUntil` date in Bangladesh |
 
-**Success Response — `200 OK`:** Returns full `PriceOffer` with nested `FactoryProfile`.
+Example request `GET /offers/5`. The path parameter `id` is an integer. The response uses the same public fields as a single item in `GET /offers`.
+
+```json
+{
+  "id": 5,
+  "teaGrade": "CTC",
+  "pricePerKg": 28.5,
+  "qualityRequirements": null,
+  "minimumQuantityKg": 100,
+  "validUntil": "2099-12-31",
+  "estimatedTransportCostBdt": 500,
+  "status": "ACTIVE",
+  "factoryProfile": {
+    "id": 2,
+    "factoryName": "Panchagarh Tea Processing Ltd.",
+    "district": "Panchagarh"
+  },
+  "createdAt": "2026-11-21T10:00:00.000Z"
+}
+```
 
 **Error Cases:**
 
 | Status | Condition |
 |---|---|
-| `401 Unauthorized` | No token |
-| `404 Not Found` | Offer not found |
+| `400 Bad Request` | ID is not an integer |
+| `401 Unauthorized` | Missing or invalid token |
+| `404 Not Found` | Offer is missing, expired by status or date, or withdrawn |
 
 ---
 
@@ -892,6 +912,47 @@ Ties are ordered by offer ID in the same direction. Offers with no minimum quant
 |---|---|
 | Auth | FACTORY |
 | Description | Get all price offers created by the authenticated factory (all statuses) |
+
+| Query parameter | Description |
+|---|---|
+| `page` | Page number starting at 1. Default is 1. |
+| `limit` | Items per page from 1 to 100. Default is 20. |
+| `status` | Optional exact match for stored status `ACTIVE`, `EXPIRED`, or `WITHDRAWN` |
+
+Ownership is determined from the JWT account's factory profile. Any factory with a profile can view its own offers. The list is ordered by creation time descending, then ID descending. An `ACTIVE` offer whose date has passed keeps its stored status here. It is hidden from the public browse and detail endpoints.
+
+Example request `GET /offers/my?status=WITHDRAWN&page=1&limit=20`.
+
+```json
+{
+  "data": [{
+    "id": 6,
+    "factoryProfileId": 2,
+    "teaGrade": "CTC",
+    "pricePerKg": 28.5,
+    "qualityRequirements": null,
+    "minimumQuantityKg": 100,
+    "validUntil": "2099-12-31",
+    "estimatedTransportCostBdt": 500,
+    "notes": "Collection every Saturday.",
+    "status": "WITHDRAWN",
+    "createdAt": "2026-11-21T10:00:00.000Z",
+    "updatedAt": "2026-11-21T11:00:00.000Z"
+  }],
+  "total": 1,
+  "page": 1,
+  "limit": 20,
+  "totalPages": 1
+}
+```
+
+| Status | Condition |
+|---|---|
+| `200 OK` | Owned offers with pagination, including an empty list when none match |
+| `400 Bad Request` | Invalid or unknown query parameter, including a client-supplied factory ID |
+| `401 Unauthorized` | Missing or invalid token |
+| `403 Forbidden` | Account lacks the FACTORY role |
+| `404 Not Found` | Account has no factory profile |
 
 ---
 
