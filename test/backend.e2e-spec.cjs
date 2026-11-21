@@ -547,6 +547,172 @@ describe("ChaBondhu backend", () => {
     });
   });
 
+  describe("GET /offers", () => {
+    let owner;
+    const grade = "Browse CTC";
+    const bearer = { type: "bearer" };
+    const browse = (query = {}) =>
+      api.get("/offers").auth(growerToken, bearer).query(query);
+
+    beforeAll(async () => {
+      owner = await runner.manager.findOneByOrFail(FactoryProfile, {
+        factoryName: "Legacy Factory",
+      });
+      const today = new Intl.DateTimeFormat("en-CA", {
+        timeZone: "Asia/Dhaka",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+      }).format(new Date());
+      const fixture = {
+        factoryProfileId: owner.id,
+        teaGrade: grade,
+        validUntil: "2099-12-31",
+        status: "ACTIVE",
+      };
+      await runner.manager.insert(PriceOffer, [
+        {
+          ...fixture,
+          pricePerKg: 22,
+          createdAt: new Date("2026-01-03"),
+          minimumQuantityKg: 50,
+        },
+        {
+          ...fixture,
+          pricePerKg: 31,
+          createdAt: new Date("2026-01-01"),
+          minimumQuantityKg: 100,
+        },
+        {
+          ...fixture,
+          pricePerKg: 28.5,
+          createdAt: new Date("2026-01-02"),
+          validUntil: today,
+        },
+        { ...fixture, pricePerKg: 101, validUntil: "2000-01-01" },
+        { ...fixture, pricePerKg: 102, status: "EXPIRED" },
+        { ...fixture, pricePerKg: 103, status: "WITHDRAWN" },
+        { ...fixture, pricePerKg: 24, teaGrade: "Browse Green" },
+      ]);
+    });
+
+    it("requires JWT and includes active offers through their expiry day with public factory fields", async () => {
+      await api.get("/offers").expect(401);
+      const response = await browse({ teaGrade: "  browse ctc  " }).expect(200);
+      expect(response.body).toMatchObject({
+        total: 3,
+        page: 1,
+        limit: 20,
+        totalPages: 1,
+      });
+      expect(response.body.data.map((row) => row.pricePerKg)).toEqual([
+        31, 28.5, 22,
+      ]);
+      expect(response.body.data[0].factoryProfile).toEqual({
+        id: owner.id,
+        factoryName: owner.factoryName,
+        district: owner.district,
+      });
+      expect(Object.keys(response.body.data[0]).sort()).toEqual([
+        "createdAt",
+        "estimatedTransportCostBdt",
+        "factoryProfile",
+        "id",
+        "minimumQuantityKg",
+        "pricePerKg",
+        "qualityRequirements",
+        "status",
+        "teaGrade",
+        "validUntil",
+      ]);
+      await api.get("/offers").auth(factoryToken, bearer).expect(200);
+      await api.get("/offers").auth(adminToken, bearer).expect(200);
+    });
+
+    it("paginates sorted offers and reports totals on empty pages", async () => {
+      const query = {
+        teaGrade: grade,
+        sortBy: "pricePerKg",
+        sortOrder: "ASC",
+        limit: 2,
+      };
+      const page1 = await browse(query).expect(200);
+      const page2 = await browse({ ...query, page: 2 }).expect(200);
+      const page3 = await browse({ ...query, page: 3 }).expect(200);
+      expect(page1.body.data.map((row) => row.pricePerKg)).toEqual([22, 28.5]);
+      expect(page2.body.data.map((row) => row.pricePerKg)).toEqual([31]);
+      expect(page2.body).toMatchObject({
+        total: 3,
+        page: 2,
+        limit: 2,
+        totalPages: 2,
+      });
+      expect(page3.body).toEqual({
+        data: [],
+        total: 3,
+        page: 3,
+        limit: 2,
+        totalPages: 2,
+      });
+    });
+
+    it("sorts by creation time, expiry, and minimum quantity", async () => {
+      for (const [sortBy, sortOrder, prices] of [
+        ["createdAt", "ASC", [31, 28.5, 22]],
+        ["createdAt", "DESC", [22, 28.5, 31]],
+        ["validUntil", "ASC", [28.5, 22, 31]],
+        ["minimumQuantityKg", "DESC", [31, 22, 28.5]],
+      ]) {
+        const result = await browse({
+          teaGrade: grade,
+          sortBy,
+          sortOrder,
+        }).expect(200);
+        expect(result.body.data.map((row) => row.pricePerKg)).toEqual(prices);
+      }
+    });
+
+    it("combines exact tea grades with inclusive BDT price bounds", async () => {
+      const result = await browse({
+        teaGrade: grade,
+        minPrice: 22,
+        maxPrice: 28.5,
+      }).expect(200);
+      expect(result.body.data.map((row) => row.pricePerKg)).toEqual([28.5, 22]);
+      const none = await browse({ teaGrade: "Browse", minPrice: 22 }).expect(
+        200,
+      );
+      expect(none.body).toEqual({
+        data: [],
+        total: 0,
+        page: 1,
+        limit: 20,
+        totalPages: 0,
+      });
+    });
+
+    it("rejects invalid pagination, filters, and sort options", async () => {
+      for (const query of [
+        { page: 0 },
+        { page: "1.5" },
+        { page: Number.MAX_SAFE_INTEGER, limit: 100 },
+        { limit: 101 },
+        { limit: "" },
+        { teaGrade: " " },
+        { minPrice: " " },
+        { minPrice: 30, maxPrice: 20 },
+        { minPrice: -1 },
+        { maxPrice: "12.345" },
+        { minPrice: ["1", "2"] },
+        { sortBy: "factoryProfileId" },
+        { sortOrder: "RANDOM" },
+        { district: "Panchagarh" },
+      ]) {
+        await browse(query).expect(400);
+      }
+    });
+  });
+
   it("enforces listing ownership and moderation and filters paginated results", async () => {
     await api.get("/listings").expect(401);
     await api
