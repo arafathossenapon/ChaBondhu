@@ -713,6 +713,194 @@ describe("ChaBondhu backend", () => {
     });
   });
 
+  describe("offer details and factory-owned offers", () => {
+    const bearer = { type: "bearer" };
+    let ownerToken;
+    let owner;
+    let otherOwner;
+    let otherToken;
+    let ids;
+    let otherId;
+
+    async function createOwner(email) {
+      await api
+        .post("/auth/register")
+        .send({ ...factory, email })
+        .expect(201);
+      const token = await login(email);
+      const { body: profile } = await api
+        .post("/factory-profiles")
+        .auth(token, bearer)
+        .send(factoryProfile)
+        .expect(201);
+      return { token, profile };
+    }
+
+    beforeAll(async () => {
+      ({ token: ownerToken, profile: owner } = await createOwner(
+        "offer-owner@example.com",
+      ));
+      ({ token: otherToken, profile: otherOwner } = await createOwner(
+        "other-offer-owner@example.com",
+      ));
+      const today = new Intl.DateTimeFormat("en-CA", {
+        timeZone: "Asia/Dhaka",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+      }).format(new Date());
+      const fixture = {
+        ...offer,
+        factoryProfileId: owner.id,
+        notes: "Owner management note",
+        createdAt: new Date("2026-11-01"),
+      };
+      const result = await runner.manager.insert(PriceOffer, [
+        { ...fixture, status: "ACTIVE", validUntil: today },
+        { ...fixture, status: "ACTIVE", validUntil: "2000-01-01" },
+        { ...fixture, status: "EXPIRED" },
+        { ...fixture, status: "WITHDRAWN" },
+      ]);
+      ids = result.identifiers.map(({ id }) => id);
+      const other = await runner.manager.insert(PriceOffer, {
+        ...fixture,
+        factoryProfileId: otherOwner.id,
+      });
+      otherId = other.identifiers[0].id;
+    });
+
+    it("returns the same public offer fields as browsing, including on its Bangladesh expiry day", async () => {
+      const detail = await api
+        .get(`/offers/${ids[0]}`)
+        .auth(growerToken, bearer)
+        .expect(200);
+      const browse = await api
+        .get("/offers")
+        .auth(growerToken, bearer)
+        .query({ teaGrade: offer.teaGrade })
+        .expect(200);
+      expect(detail.body).toEqual(
+        browse.body.data.find(({ id }) => id === ids[0]),
+      );
+      expect(detail.body.factoryProfile).toEqual({
+        id: owner.id,
+        factoryName: owner.factoryName,
+        district: owner.district,
+      });
+      for (const field of [
+        "notes",
+        "factoryProfileId",
+        "updatedAt",
+        "passwordHash",
+        "verificationHistory",
+      ]) {
+        expect(detail.body).not.toHaveProperty(field);
+      }
+      await api.get(`/offers/${otherId}`).auth(ownerToken, bearer).expect(200);
+    });
+
+    it("uses the same not-found response for unavailable and unknown offers", async () => {
+      await api.get(`/offers/${ids[0]}`).expect(401);
+      const missing = await api
+        .get("/offers/2147483647")
+        .auth(growerToken, bearer)
+        .expect(404);
+      for (const id of [...ids.slice(1), "99999999999"]) {
+        const response = await api
+          .get(`/offers/${id}`)
+          .auth(growerToken, bearer)
+          .expect(404);
+        expect(response.body).toEqual(missing.body);
+      }
+      await api.get("/offers/not-an-id").auth(growerToken, bearer).expect(400);
+    });
+
+    it("paginates only the factory's own offers and keeps all stored statuses", async () => {
+      const page1 = await api
+        .get("/offers/my")
+        .auth(ownerToken, bearer)
+        .query({ limit: 2 })
+        .expect(200);
+      const page2 = await api
+        .get("/offers/my")
+        .auth(ownerToken, bearer)
+        .query({ limit: 2, page: 2 })
+        .expect(200);
+      expect(page1.body).toMatchObject({
+        page: 1,
+        limit: 2,
+        total: 4,
+        totalPages: 2,
+      });
+      expect(page2.body).toMatchObject({
+        page: 2,
+        limit: 2,
+        total: 4,
+        totalPages: 2,
+      });
+      const offers = [...page1.body.data, ...page2.body.data];
+      expect(offers.map(({ id }) => id)).toEqual([...ids].reverse());
+      expect(offers.map(({ status }) => status)).toEqual([
+        "WITHDRAWN",
+        "EXPIRED",
+        "ACTIVE",
+        "ACTIVE",
+      ]);
+      for (const result of offers) {
+        expect(result).toMatchObject({
+          factoryProfileId: owner.id,
+          notes: "Owner management note",
+          updatedAt: expect.any(String),
+        });
+        expect(result).not.toHaveProperty("factoryProfile");
+      }
+      const other = await api
+        .get("/offers/my")
+        .auth(otherToken, bearer)
+        .expect(200);
+      expect(other.body).toMatchObject({
+        page: 1,
+        limit: 20,
+        total: 1,
+        totalPages: 1,
+      });
+      expect(other.body.data.map(({ id }) => id)).toEqual([otherId]);
+      const expired = await api
+        .get("/offers/my")
+        .auth(ownerToken, bearer)
+        .query({ status: "EXPIRED" })
+        .expect(200);
+      expect(expired.body.data.map(({ id }) => id)).toEqual([ids[2]]);
+    });
+
+    it("restricts ownership to the authenticated factory and validates owner queries", async () => {
+      await api.get("/offers/my").expect(401);
+      for (const token of [growerToken, adminToken]) {
+        await api.get("/offers/my").auth(token, bearer).expect(403);
+      }
+      for (const query of [
+        { factoryProfileId: otherOwner.id },
+        { factoryId: otherOwner.id },
+        { status: "INVALID" },
+        { page: 0 },
+        { limit: 101 },
+      ]) {
+        await api
+          .get("/offers/my")
+          .auth(ownerToken, bearer)
+          .query(query)
+          .expect(400);
+      }
+      const email = "no-profile-offers@example.com";
+      await api
+        .post("/auth/register")
+        .send({ ...factory, email })
+        .expect(201);
+      const token = await login(email);
+      await api.get("/offers/my").auth(token, bearer).expect(404);
+    });
+  });
+
   it("enforces listing ownership and moderation and filters paginated results", async () => {
     await api.get("/listings").expect(401);
     await api
