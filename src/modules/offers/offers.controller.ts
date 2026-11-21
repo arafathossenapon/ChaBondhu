@@ -4,6 +4,7 @@ import {
   Get,
   Param,
   ParseIntPipe,
+  Patch,
   Post,
   Query,
   UseGuards,
@@ -22,6 +23,7 @@ import { JwtGuard } from "@/common/guard/jwt.guard";
 import { RolesGuard } from "@/common/guard/roles.guard";
 import { AuthUser } from "@/common/interfaces/auth-user.interface";
 import { CreatePriceOfferDto } from "./dto/create-price-offer.dto";
+import { UpdatePriceOfferDto } from "./dto/update-price-offer.dto";
 import { QueryPriceOffersDto } from "./dto/query-price-offers.dto";
 import { QueryOwnPriceOffersDto } from "./dto/query-own-price-offers.dto";
 import { OffersService } from "./offers.service";
@@ -159,5 +161,56 @@ export class OffersController {
   })
   publish(@CurrentUser() actor: AuthUser, @Body() dto: CreatePriceOfferDto) {
     return this.offers.publish(actor, dto);
+  }
+
+  @Patch(":id")
+  @UseGuards(JwtGuard, RolesGuard)
+  @Roles(Role.FACTORY)
+  @ApiOperation({
+    summary: "Edit an active, unexpired offer (verified owner only)",
+  })
+  @ApiParam({ name: "id", type: Number, description: "Offer ID", example: 5 })
+  @ApiResponse({ status: 200, description: "Updated offer" })
+  @ApiResponse({
+    status: 400,
+    description: "Invalid offer ID, edit fields, or new expiry date",
+  })
+  @ApiResponse({ status: 401, description: "Authentication required" })
+  @ApiResponse({
+    status: 403,
+    description: "Verified factory ownership required",
+  })
+  @ApiResponse({
+    status: 404,
+    description: "Offer or factory profile not found",
+  })
+  @ApiResponse({ status: 409, description: "Offer is expired or withdrawn" })
+  update(
+    @CurrentUser() actor: AuthUser,
+    @Param("id", ParseIntPipe) id: number,
+    @Body() dto: UpdatePriceOfferDto,
+  ) {
+    return this.offers.update(actor, id, dto);
+  }
+
+  @Patch(":id/withdraw")
+  @UseGuards(JwtGuard, RolesGuard)
+  @Roles(Role.FACTORY)
+  @ApiOperation({ summary: "Withdraw an active, unexpired offer (owner only)" })
+  @ApiParam({ name: "id", type: Number, description: "Offer ID", example: 5 })
+  @ApiResponse({ status: 200, description: "Offer with WITHDRAWN status" })
+  @ApiResponse({ status: 400, description: "Invalid offer ID format" })
+  @ApiResponse({ status: 401, description: "Authentication required" })
+  @ApiResponse({ status: 403, description: "Factory ownership required" })
+  @ApiResponse({
+    status: 404,
+    description: "Offer or factory profile not found",
+  })
+  @ApiResponse({ status: 409, description: "Offer is expired or withdrawn" })
+  withdraw(
+    @CurrentUser() actor: AuthUser,
+    @Param("id", ParseIntPipe) id: number,
+  ) {
+    return this.offers.withdraw(actor, id);
   }
 }

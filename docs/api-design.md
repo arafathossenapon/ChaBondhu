@@ -919,7 +919,7 @@ Example request `GET /offers/5`. The path parameter `id` is an integer. The resp
 | `limit` | Items per page from 1 to 100. Default is 20. |
 | `status` | Optional exact match for stored status `ACTIVE`, `EXPIRED`, or `WITHDRAWN` |
 
-Ownership is determined from the JWT account's factory profile. Any factory with a profile can view its own offers. The list is ordered by creation time descending, then ID descending. An `ACTIVE` offer whose date has passed keeps its stored status here. It is hidden from the public browse and detail endpoints.
+Ownership is determined from the JWT account's factory profile. Any factory with a profile can view its own offers. The list is ordered by creation time descending, then ID descending. After an offer's expiry date passes in Bangladesh, public browse and detail hide it immediately. The owner list continues to return the stored status until the next successful expiry sweep.
 
 Example request `GET /offers/my?status=WITHDRAWN&page=1&limit=20`.
 
@@ -962,8 +962,8 @@ Example request `GET /offers/my?status=WITHDRAWN&page=1&limit=20`.
 
 | Property | Value |
 |---|---|
-| Auth | FACTORY |
-| Description | Update an active price offer. Only the owning factory can update it. Existing orders are NOT affected. |
+| Auth | Verified FACTORY that owns the offer |
+| Description | Update an `ACTIVE` offer through its expiry date in Bangladesh. Expired and withdrawn offers cannot be reactivated. |
 
 **Request Body (all optional):**
 
@@ -976,17 +976,19 @@ Example request `GET /offers/my?status=WITHDRAWN&page=1&limit=20`.
 }
 ```
 
-**Success Response — `200 OK`:** Returns the updated `PriceOffer`.
+Only these four fields can be edited. Price and quantity use the same precision rules as publishing. A replacement `validUntil` must be after today in Bangladesh. Set `minimumQuantityKg` or `notes` to `null` to clear them.
+
+**Success Response — `200 OK`:** Returns the updated offer record using the same fields as an item in `GET /offers/my`.
 
 **Error Cases:**
 
 | Status | Condition |
 |---|---|
-| `400 Bad Request` | Invalid fields |
-| `401 Unauthorized` | No token |
-| `403 Forbidden` | Not the offer's owner |
-| `404 Not Found` | Offer not found |
-| `409 Conflict` | Offer is not in `ACTIVE` status |
+| `400 Bad Request` | Non-integer ID, invalid or protected fields, or a replacement expiry on or before today |
+| `401 Unauthorized` | Missing or invalid token |
+| `403 Forbidden` | Caller lacks the FACTORY role, is unverified, or does not own the offer |
+| `404 Not Found` | Offer or factory profile not found |
+| `409 Conflict` | Offer is expired by date or status, or is withdrawn |
 
 ---
 
@@ -996,19 +998,26 @@ Example request `GET /offers/my?status=WITHDRAWN&page=1&limit=20`.
 
 | Property | Value |
 |---|---|
-| Auth | FACTORY |
-| Description | Withdraw an active offer. Sets status to `WITHDRAWN`. Existing orders are NOT affected. |
+| Auth | FACTORY that owns the offer |
+| Description | Set an active, unexpired offer to `WITHDRAWN`. Public reads hide it immediately and the owner can still view it. |
 
-**Success Response — `200 OK`:** Returns the offer with `status: "WITHDRAWN"`.
+No request body is required.
+
+**Success Response — `200 OK`:** Returns the offer record with `status: "WITHDRAWN"`.
 
 **Error Cases:**
 
 | Status | Condition |
 |---|---|
-| `401 Unauthorized` | No token |
-| `403 Forbidden` | Not the offer's owner |
-| `404 Not Found` | Offer not found |
-| `409 Conflict` | Offer is already withdrawn or expired |
+| `400 Bad Request` | Non-integer ID |
+| `401 Unauthorized` | Missing or invalid token |
+| `403 Forbidden` | Caller lacks the FACTORY role or does not own the offer |
+| `404 Not Found` | Offer or factory profile not found |
+| `409 Conflict` | Offer is already withdrawn or expired by date or status |
+
+#### Automatic expiry
+
+An offer remains valid through its `validUntil` day in `Asia/Dhaka`. The app checks for overdue offers at startup and every minute. The sweep changes only overdue `ACTIVE` records to `EXPIRED` and leaves existing `EXPIRED` and `WITHDRAWN` records intact. Public reads also apply the date cutoff directly.
 
 ---
 

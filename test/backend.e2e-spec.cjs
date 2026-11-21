@@ -25,6 +25,7 @@ const {
 const {
   PriceOffer,
 } = require("../dist/modules/offers/entities/price-offer.entity");
+const { OffersService } = require("../dist/modules/offers/offers.service");
 const {
   FactoryVerificationService,
 } = require("../dist/modules/factory-profiles/factory-verification.service");
@@ -92,6 +93,7 @@ describe("ChaBondhu backend", () => {
   let otherGrowerToken;
   let factoryToken;
   let adminToken;
+  let startupExpiryOfferId;
 
   async function login(email) {
     const response = await api
@@ -131,6 +133,16 @@ describe("ChaBondhu backend", () => {
     );
     await new TrackFactoryVerificationReviews1795300000000().up(runner);
     await new CreatePriceOffers1795300100000().up(runner);
+    const legacyProfile = await runner.manager.findOneByOrFail(FactoryProfile, {
+      userId: legacyFactory.id,
+    });
+    const startupOffer = await runner.manager.insert(PriceOffer, {
+      ...offer,
+      teaGrade: "Startup expiry fixture",
+      factoryProfileId: legacyProfile.id,
+      validUntil: "1990-01-01",
+    });
+    startupExpiryOfferId = startupOffer.identifiers[0].id;
 
     const testingModule = Test.createTestingModule({ imports: [AppModule] })
       .overrideProvider(DataSource)
@@ -898,6 +910,264 @@ describe("ChaBondhu backend", () => {
         .expect(201);
       const token = await login(email);
       await api.get("/offers/my").auth(token, bearer).expect(404);
+    });
+  });
+
+  describe("price offer lifecycle", () => {
+    const bearer = { type: "bearer" };
+    let ownerToken;
+    let ownerProfile;
+    let otherToken;
+    let unverifiedToken;
+    let unverifiedProfile;
+
+    async function createFactory(email, verified) {
+      const { body: account } = await api
+        .post("/auth/register")
+        .send({ ...factory, email })
+        .expect(201);
+      const token = await login(email);
+      const { body: profile } = await api
+        .post("/factory-profiles")
+        .auth(token, bearer)
+        .send(factoryProfile)
+        .expect(201);
+      if (verified) {
+        await api
+          .patch(`/admin/users/${account.id}/verify`)
+          .auth(adminToken, bearer)
+          .expect(200);
+      }
+      return { token, profile };
+    }
+
+    async function insertOffer(changes = {}) {
+      const result = await runner.manager.insert(PriceOffer, {
+        ...offer,
+        factoryProfileId: ownerProfile.id,
+        ...changes,
+      });
+      return result.identifiers[0].id;
+    }
+
+    beforeAll(async () => {
+      ({ token: ownerToken, profile: ownerProfile } = await createFactory(
+        "lifecycle-owner@example.com",
+        true,
+      ));
+      ({ token: otherToken } = await createFactory(
+        "lifecycle-other@example.com",
+        true,
+      ));
+      ({ token: unverifiedToken, profile: unverifiedProfile } =
+        await createFactory("lifecycle-unverified@example.com", false));
+    });
+
+    it("updates the four documented fields as the verified owner and preserves ownership and status", async () => {
+      const created = await api
+        .post("/offers")
+        .auth(ownerToken, bearer)
+        .send(offer)
+        .expect(201);
+      const path = `/offers/${created.body.id}`;
+      const changes = {
+        pricePerKg: 31.75,
+        minimumQuantityKg: 125.125,
+        validUntil: "2099-12-30",
+        notes: "Updated pickup terms",
+      };
+      const updated = await api
+        .patch(path)
+        .auth(ownerToken, bearer)
+        .send(changes)
+        .expect(200);
+      expect(updated.body).toMatchObject({
+        ...changes,
+        id: created.body.id,
+        factoryProfileId: ownerProfile.id,
+        status: "ACTIVE",
+        teaGrade: offer.teaGrade,
+      });
+      expect(updated.body).not.toHaveProperty("factoryProfile");
+      const cleared = await api
+        .patch(path)
+        .auth(ownerToken, bearer)
+        .send({ minimumQuantityKg: null, notes: null })
+        .expect(200);
+      expect(cleared.body).toMatchObject({
+        minimumQuantityKg: null,
+        notes: null,
+        pricePerKg: changes.pricePerKg,
+      });
+      const detail = await api.get(path).auth(growerToken, bearer).expect(200);
+      expect(detail.body.pricePerKg).toBe(changes.pricePerKg);
+      expect(detail.body).not.toHaveProperty("notes");
+    });
+
+    it("rejects unauthorized editing and withdrawal, including a different factory and admins", async () => {
+      const id = await insertOffer();
+      for (const suffix of ["", "/withdraw"]) {
+        const path = `/offers/${id}${suffix}`;
+        await api.patch(path).send({ pricePerKg: 30 }).expect(401);
+        for (const token of [growerToken, adminToken, otherToken]) {
+          await api
+            .patch(path)
+            .auth(token, bearer)
+            .send({ pricePerKg: 30 })
+            .expect(403);
+        }
+        await api
+          .patch(`/offers/2147483647${suffix}`)
+          .auth(ownerToken, bearer)
+          .send({ pricePerKg: 30 })
+          .expect(404);
+      }
+      const unverifiedId = await insertOffer({
+        factoryProfileId: unverifiedProfile.id,
+      });
+      await api
+        .patch(`/offers/${unverifiedId}`)
+        .auth(unverifiedToken, bearer)
+        .send({ pricePerKg: 30 })
+        .expect(403);
+      await api
+        .patch(`/offers/${unverifiedId}/withdraw`)
+        .auth(unverifiedToken, bearer)
+        .expect(200);
+    });
+
+    it("rejects protected or undocumented fields and invalid prices, quantities, and dates", async () => {
+      const id = await insertOffer();
+      const today = new Intl.DateTimeFormat("en-CA", {
+        timeZone: "Asia/Dhaka",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+      }).format(new Date());
+      for (const changes of [
+        { id: 1 },
+        { factoryProfileId: 1 },
+        { status: "WITHDRAWN" },
+        { teaGrade: "Green" },
+        { qualityRequirements: "Test" },
+        { estimatedTransportCostBdt: 1 },
+        { pricePerKg: 0 },
+        { pricePerKg: null },
+        { pricePerKg: 1e-7 },
+        { minimumQuantityKg: -1 },
+        { minimumQuantityKg: 1.0001 },
+        { notes: {} },
+        { validUntil: "2000-01-01" },
+        { validUntil: today },
+        { validUntil: "2099-02-29" },
+        { validUntil: null },
+      ]) {
+        await api
+          .patch(`/offers/${id}`)
+          .auth(ownerToken, bearer)
+          .send(changes)
+          .expect(400);
+      }
+      const stored = await runner.manager.findOneByOrFail(PriceOffer, { id });
+      expect(stored).toMatchObject({
+        pricePerKg: offer.pricePerKg,
+        validUntil: offer.validUntil,
+        status: "ACTIVE",
+      });
+    });
+
+    it("withdraws an offer once, hides it from public reads, and keeps it in the owner's list", async () => {
+      const id = await insertOffer({ teaGrade: "Withdrawal fixture" });
+      const path = `/offers/${id}`;
+      const browse = () =>
+        api
+          .get("/offers")
+          .auth(growerToken, bearer)
+          .query({ teaGrade: "Withdrawal fixture" });
+      await api.get(path).auth(growerToken, bearer).expect(200);
+      expect((await browse().expect(200)).body.total).toBe(1);
+      const withdrawal = await api
+        .patch(`${path}/withdraw`)
+        .auth(ownerToken, bearer)
+        .expect(200);
+      expect(withdrawal.body).toMatchObject({
+        id,
+        status: "WITHDRAWN",
+        factoryProfileId: ownerProfile.id,
+      });
+      await api.patch(`${path}/withdraw`).auth(ownerToken, bearer).expect(409);
+      await api
+        .patch(path)
+        .auth(ownerToken, bearer)
+        .send({ pricePerKg: 30 })
+        .expect(409);
+      await api.get(path).auth(growerToken, bearer).expect(404);
+      expect((await browse().expect(200)).body.total).toBe(0);
+      const own = await api
+        .get("/offers/my")
+        .auth(ownerToken, bearer)
+        .query({ status: "WITHDRAWN" })
+        .expect(200);
+      expect(own.body.data).toEqual([
+        expect.objectContaining({ id, status: "WITHDRAWN" }),
+      ]);
+    });
+
+    it("rejects both transitions for expired offers, even before their stored status changes", async () => {
+      const expired = await insertOffer({ status: "EXPIRED" });
+      const staleActive = await insertOffer({ validUntil: "2000-01-01" });
+      for (const id of [expired, staleActive]) {
+        await api
+          .patch(`/offers/${id}`)
+          .auth(ownerToken, bearer)
+          .send({ validUntil: "2099-12-31" })
+          .expect(409);
+        await api
+          .patch(`/offers/${id}/withdraw`)
+          .auth(ownerToken, bearer)
+          .expect(409);
+      }
+      const stored = await runner.manager.findOneByOrFail(PriceOffer, {
+        id: staleActive,
+      });
+      expect(stored).toMatchObject({
+        status: "ACTIVE",
+        validUntil: "2000-01-01",
+      });
+    });
+
+    it("expires overdue offers at startup and transitions only ACTIVE rows after Dhaka midnight", async () => {
+      expect(
+        (
+          await runner.manager.findOneByOrFail(PriceOffer, {
+            id: startupExpiryOfferId,
+          })
+        ).status,
+      ).toBe("EXPIRED");
+      const validUntil = "1999-01-01";
+      const active = await insertOffer({ validUntil });
+      const withdrawn = await insertOffer({ validUntil, status: "WITHDRAWN" });
+      const expired = await insertOffer({ validUntil, status: "EXPIRED" });
+      const offers = app.get(OffersService);
+      await expect(
+        offers.expireOffers(new Date("1999-01-01T17:59:59.999Z")),
+      ).resolves.toBe(0);
+      const boundary = new Date("1999-01-01T18:00:00Z");
+      await expect(offers.expireOffers(boundary)).resolves.toBe(1);
+      await expect(offers.expireOffers(boundary)).resolves.toBe(0);
+      const own = await api
+        .get("/offers/my")
+        .auth(ownerToken, bearer)
+        .query({ status: "EXPIRED" })
+        .expect(200);
+      expect(own.body.data.map(({ id }) => id)).toEqual(
+        expect.arrayContaining([active, expired]),
+      );
+      expect(own.body.data.map(({ id }) => id)).not.toContain(withdrawn);
+      expect(
+        (await runner.manager.findOneByOrFail(PriceOffer, { id: withdrawn }))
+          .status,
+      ).toBe("WITHDRAWN");
     });
   });
 
