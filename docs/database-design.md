@@ -245,7 +245,7 @@ enum UserRole {
 | `lastHarvestDate` | `Date` | `DATE` | Yes | `NULL` | Optional previous harvest date |
 | `qualityDescription` | `string` | `TEXT` | Yes | `NULL` | Free-text quality description |
 | `collectionLocation` | `string` | `VARCHAR(255)` | No | — | Where leaves can be picked up |
-| `status` | `ListingStatus` | `VARCHAR(20)` | No | `'ACTIVE'` | Enum: `ACTIVE`, `SOLD`, `EXPIRED`, `CANCELLED` |
+| `status` | `ListingStatus` | `VARCHAR(20)` | No | `'ACTIVE'` | Enum: `ACTIVE`, `RESERVED`, `SOLD`, `EXPIRED`, `CANCELLED` |
 | `notes` | `string` | `TEXT` | Yes | `NULL` | Optional additional information |
 | `isActive` | `boolean` | `BOOLEAN` | No | `true` | Soft-delete flag for admin moderation |
 | `createdAt` | `Date` | `TIMESTAMPTZ` | No | `now()` | — |
@@ -371,132 +371,57 @@ enum OfferStatus {
 
 ## 7. Entity: Order
 
-**Table name:** `order`  
-**Purpose:** A procurement order linking a farmer's harvest listing to a factory's price offer. Central entity of the platform.
+### 7.1 Order requests
 
-### 7.1 Columns
+`order_requests` links an existing `harvest_listings` row to a `price_offers` row with restrictive foreign keys. The listing identifies the grower and the offer identifies the factory.
 
-| Column | TypeScript Type | PostgreSQL Type | Nullable | Default | Description |
-|---|---|---|---|---|---|
-| `id` | `number` | `SERIAL` PK | No | auto | Primary key |
-| `harvestListingId` | `number` | `INTEGER` FK | No | — | References `harvest_listing.id` |
-| `priceOfferId` | `number` | `INTEGER` FK | No | — | References `price_offer.id` |
-| `farmerProfileId` | `number` | `INTEGER` FK | No | — | Denormalized reference to `farmer_profile.id` (for query convenience) |
-| `factoryProfileId` | `number` | `INTEGER` FK | No | — | Denormalized reference to `factory_profile.id` (for query convenience) |
-| `agreedPricePerKg` | `number` | `NUMERIC(12, 2)` | No | — | **Copied from `priceOffer.pricePerKg` at creation. IMMUTABLE.** |
-| `estimatedQuantityKg` | `number` | `NUMERIC(10, 3)` | No | — | Copied from `harvestListing.estimatedQuantityKg` at creation |
-| `actualCollectedWeightKg` | `number` | `NUMERIC(10, 3)` | Yes | `NULL` | Set by factory after physical collection |
-| `orderStatus` | `OrderStatus` | `VARCHAR(30)` | No | `'REQUESTED'` | Current order status (see state machine) |
-| `paymentStatus` | `PaymentStatus` | `VARCHAR(20)` | No | `'PENDING'` | Current payment status (independent of order status) |
-| `proposedCollectionDate` | `Date` | `DATE` | Yes | `NULL` | Set when status moves to `PICKUP_SCHEDULED` |
-| `collectionPoint` | `string` | `VARCHAR(255)` | Yes | `NULL` | Collection address set at scheduling |
-| `pickupNotes` | `string` | `TEXT` | Yes | `NULL` | Optional logistics notes from factory |
-| `estimatedTransportCostBdt` | `number` | `NUMERIC(12, 2)` | Yes | `NULL` | Transport cost for this specific order |
-| `pickupBatchId` | `number` | `INTEGER` FK | Yes | `NULL` | Optional future link to `pickup_batch.id` |
-| `createdAt` | `Date` | `TIMESTAMPTZ` | No | `now()` | — |
-| `updatedAt` | `Date` | `TIMESTAMPTZ` | No | `now()` | — |
+| Field | Storage and rule |
+|---|---|
+| `id` | `SERIAL` primary key |
+| `harvestListingId`, `priceOfferId` | Required, immutable FK identifiers |
+| `quotedPricePerKg` | Positive `NUMERIC(12,2)`. Immutable snapshot at submission. |
+| `status` | `PENDING`, `ACCEPTED`, `REJECTED`, `CLOSED`, or `WITHDRAWN` |
+| `closureReason` | Required only for `CLOSED`. `ANOTHER_REQUEST_ACCEPTED` or `LISTING_UNAVAILABLE`. |
+| `createdAt`, `updatedAt` | `TIMESTAMPTZ` |
 
-### 7.2 Enum: OrderStatus
+A partial unique index on `(harvest_listing_id, price_offer_id)` covers pending requests for the same offer. The service holds the listing lock while checking for any pending request from that factory across its offers. Indexes on `(harvest_listing_id, status)` and `price_offer_id` support reads and decisions.
 
-```typescript
-enum OrderStatus {
-  REQUESTED        = 'REQUESTED',
-  ACCEPTED         = 'ACCEPTED',
-  REJECTED         = 'REJECTED',
-  PICKUP_SCHEDULED = 'PICKUP_SCHEDULED',
-  COLLECTED        = 'COLLECTED',
-  COMPLETED        = 'COMPLETED',
-  CANCELLED        = 'CANCELLED',
-}
-```
+### 7.2 Confirmed orders
 
-### 7.3 Enum: PaymentStatus
+| Field | Storage and rule |
+|---|---|
+| `id` | `SERIAL` primary key |
+| `orderRequestId`, `harvestListingId` | Required composite FK to the request and its listing. `orderRequestId` is unique. |
+| `agreedPricePerKg` | Positive `NUMERIC(12,2)`. Immutable copy of the submitted quote. |
+| `estimatedQuantityKg` | Positive `NUMERIC(10,3)`. Immutable copy of the listing estimate at acceptance. |
+| `actualCollectedWeightKg` | Nullable `NUMERIC(10,3)`. Required for collected and completed orders, with a minimum of zero. |
+| `orderStatus` | `ACCEPTED`, `PICKUP_SCHEDULED`, `COLLECTED`, `COMPLETED`, or `CANCELLED`. Default is `ACCEPTED`. |
+| `paymentStatus` | `PENDING`, `PROCESSING`, `COMPLETED`, or `FAILED`. Default is `PENDING`. |
+| `proposedCollectionDate`, `collectionPoint` | `DATE` and `VARCHAR(255)`. Required from pickup scheduling onward. |
+| `pickupNotes`, `estimatedTransportCostBdt` | Optional `TEXT` and non-negative `NUMERIC(12,2)`. |
+| `createdAt`, `updatedAt` | `TIMESTAMPTZ` |
 
-```typescript
-enum PaymentStatus {
-  PENDING    = 'PENDING',
-  PROCESSING = 'PROCESSING',
-  COMPLETED  = 'COMPLETED',
-  FAILED     = 'FAILED',
-}
-```
+Order ownership follows the request's listing and offer. A partial unique index allows one order per listing in `ACCEPTED`, `PICKUP_SCHEDULED`, `COLLECTED`, or `COMPLETED`. Cancelled orders remain in history. An eligible pre-pickup cancellation reopens a reserved listing. A moderated listing remains unavailable.
 
-### 7.4 Valid Order Status Transitions
+### 7.3 Transactions and status changes
 
-| From | To | Triggered By | Condition |
-|---|---|---|---|
-| `REQUESTED` | `ACCEPTED` | Factory | Factory owns the price offer |
-| `REQUESTED` | `REJECTED` | Factory | Factory owns the price offer |
-| `ACCEPTED` | `PICKUP_SCHEDULED` | Factory | Pickup fields must be provided |
-| `ACCEPTED` | `CANCELLED` | Farmer | Farmer owns the listing |
-| `PICKUP_SCHEDULED` | `COLLECTED` | Factory | `actualCollectedWeightKg` must be provided |
-| `COLLECTED` | `COMPLETED` | Factory | Payment record must exist |
-| Any other combination | — | — | ❌ REJECTED (403 or 400) |
+The grower's acceptance locks the listing first, rechecks eligibility, creates the order, accepts the request, reserves the listing, and closes competing pending requests in one transaction. Listing edits, cancellation, moderation, and order transitions coordinate using the same listing lock.
 
-### 7.5 Valid Payment Status Transitions
-
-| From | To | Triggered By |
+| From | To | Actor and prerequisite |
 |---|---|---|
-| `PENDING` | `PROCESSING` | Factory |
-| `PROCESSING` | `COMPLETED` | Factory |
-| `PENDING` | `FAILED` | Factory |
-| `PROCESSING` | `FAILED` | Factory |
-| Any other combination | — | ❌ REJECTED |
+| `ACCEPTED` | `CANCELLED` | Grower who owns the listing, before pickup is scheduled |
+| `ACCEPTED` | `PICKUP_SCHEDULED` | Owning factory, with pickup date and point |
+| `PICKUP_SCHEDULED` | `COLLECTED` | Owning factory, with actual weight |
+| `COLLECTED` | `COMPLETED` | Future action by the owning factory after confirmed payment. Completion marks the listing `SOLD`. |
 
-### 7.6 Constraints
-
-| Constraint | Column | Rule |
-|---|---|---|
-| PRIMARY KEY | `id` | — |
-| FOREIGN KEY | `harvestListingId` → `harvest_listing.id` | Valid listing |
-| FOREIGN KEY | `priceOfferId` → `price_offer.id` | Valid offer |
-| FOREIGN KEY | `farmerProfileId` → `farmer_profile.id` | Valid farmer |
-| FOREIGN KEY | `factoryProfileId` → `factory_profile.id` | Valid factory |
-| FOREIGN KEY | `pickupBatchId` → `pickup_batch.id` | Optional; valid batch if set |
-| NOT NULL | `harvestListingId`, `priceOfferId`, `farmerProfileId`, `factoryProfileId`, `agreedPricePerKg`, `estimatedQuantityKg`, `orderStatus`, `paymentStatus` | Required |
-| CHECK | `agreedPricePerKg > 0` | Price must be positive |
-| CHECK | `estimatedQuantityKg > 0` | Quantity must be positive |
-| CHECK | `actualCollectedWeightKg IS NULL OR actualCollectedWeightKg >= 0` | Weight if set must be non-negative |
-
-### 7.7 Relationships
-
-| Relationship | With Entity | Cardinality | FK Location |
-|---|---|---|---|
-| Belongs to | `HarvestListing` | N : 1 | `order.harvestListingId` |
-| Belongs to | `PriceOffer` | N : 1 | `order.priceOfferId` |
-| Belongs to | `FarmerProfile` | N : 1 | `order.farmerProfileId` |
-| Belongs to | `FactoryProfile` | N : 1 | `order.factoryProfileId` |
-| Has one | `Payment` | 1 : 0..1 | `payment.orderId` |
-| Belongs to (optional) | `PickupBatch` | N : 0..1 | `order.pickupBatchId` |
-
-### 7.8 Indexes
-
-| Index | Column | Reason |
-|---|---|---|
-| PRIMARY | `id` | — |
-| INDEX | `farmerProfileId` | Load all orders for a farmer |
-| INDEX | `factoryProfileId` | Load all orders for a factory |
-| INDEX | `harvestListingId` | Check if a listing already has an active order |
-| INDEX | `priceOfferId` | Load orders placed against a specific offer |
-| INDEX | `orderStatus` | Filter by status in dashboard views |
-| INDEX | `paymentStatus` | Filter by payment status |
-| COMPOSITE | `(farmerProfileId, orderStatus)` | Farmer's active/completed order views |
-| COMPOSITE | `(factoryProfileId, orderStatus)` | Factory's incoming/active order views |
-
-### 7.9 Business Notes
-
-- `agreedPricePerKg` is set once at order creation by copying `priceOffer.pricePerKg`. It must never be overwritten.
-- `estimatedQuantityKg` is also copied from the listing at creation for historical reference.
-- `actualCollectedWeightKg` is entered by the factory when moving the order to `COLLECTED`. It is the basis for payment.
-- `orderStatus` and `paymentStatus` are independent fields. A factory may update payment status without changing order status.
-- Denormalized `farmerProfileId` and `factoryProfileId` are included to avoid expensive joins in common queries (e.g., "show all orders for this factory").
+Pickup and collection preserve `paymentStatus`. The later Payments workflow will record payment confirmation independently.
 
 ---
 
 ## 8. Entity: PickupBatch
 
 **Table name:** `pickup_batch`  
-**Purpose:** Groups multiple orders into a single factory pickup trip. This entity is **future-ready** — it is designed now but its use is optional in the MVP. In the MVP, pickup details live directly on the `Order`. The `PickupBatch` entity exists so the schema can support grouped pickups in a future release without a breaking migration.
+**Purpose:** Future design for grouping several orders into a single factory pickup trip. Phase 7 stores pickup fields directly on each order.
 
 ### 8.1 Columns
 
@@ -539,7 +464,7 @@ enum BatchStatus {
 
 ### 8.5 MVP Note
 
-> In the MVP, `Order.pickupBatchId` will remain `NULL`. All pickup coordination is done directly through the `Order` entity fields (`proposedCollectionDate`, `collectionPoint`, `pickupNotes`). `PickupBatch` is scaffolded for future use only and will not be used by any MVP service logic.
+Pickup uses the fields on `Order`. A future migration can add `pickup_batches` and an optional relation when grouped pickups are needed.
 
 ---
 
@@ -553,7 +478,7 @@ enum BatchStatus {
 | Column | TypeScript Type | PostgreSQL Type | Nullable | Default | Description |
 |---|---|---|---|---|---|
 | `id` | `number` | `SERIAL` PK | No | auto | Primary key |
-| `orderId` | `number` | `INTEGER` FK | No | — | References `order.id`; unique (one payment per order) |
+| `orderId` | `number` | `INTEGER` FK | No | — | References `orders.id`, unique for one payment per order |
 | `agreedPricePerKg` | `number` | `NUMERIC(12, 2)` | No | — | Copied from `order.agreedPricePerKg`; for display and audit |
 | `actualCollectedWeightKg` | `number` | `NUMERIC(10, 3)` | No | — | Copied from `order.actualCollectedWeightKg` at payment record creation |
 | `totalAmountBdt` | `number` | `NUMERIC(12, 2)` | No | — | Calculated: `agreedPricePerKg × actualCollectedWeightKg` |
@@ -570,7 +495,7 @@ enum BatchStatus {
 |---|---|---|
 | PRIMARY KEY | `id` | — |
 | UNIQUE | `orderId` | One payment record per order |
-| FOREIGN KEY | `orderId` → `order.id` | Must reference a valid order |
+| FOREIGN KEY | `orderId` → `orders.id` | Must reference a valid order |
 | NOT NULL | `orderId`, `agreedPricePerKg`, `actualCollectedWeightKg`, `totalAmountBdt`, `paymentStatus` | Required |
 | CHECK | `agreedPricePerKg > 0` | Price must be positive |
 | CHECK | `actualCollectedWeightKg >= 0` | Weight must be non-negative |
@@ -607,10 +532,9 @@ enum BatchStatus {
 | `User` → `FactoryProfile` | 1 : 0..1 | Has one (optional) | A FACTORY user may have one factory profile |
 | `FarmerProfile` → `HarvestListing` | 1 : N | Has many | A farmer can have multiple listings |
 | `FactoryProfile` → `PriceOffer` | 1 : N | Has many | A factory can have multiple offers |
-| `HarvestListing` → `Order` | 1 : N | Has many | A listing can have multiple order requests (but only one accepted) |
-| `PriceOffer` → `Order` | 1 : N | Has many | An offer can have orders from multiple farmers |
-| `FarmerProfile` → `Order` | 1 : N | Has many | A farmer can have many orders (denormalized) |
-| `FactoryProfile` → `Order` | 1 : N | Has many | A factory can have many orders (denormalized) |
+| `HarvestListing` → `OrderRequest` | 1 : N | Has many | Multiple factories may request a listing |
+| `PriceOffer` → `OrderRequest` | 1 : N | Has many | One offer can back requests for different listings |
+| `OrderRequest` → `Order` | 1 : 0..1 | Has one (optional) | An accepted request creates one order |
 | `Order` → `Payment` | 1 : 0..1 | Has one (optional) | An order has at most one payment record |
 | `FactoryProfile` → `PickupBatch` | 1 : N | Has many | Future: a factory organizes pickup batches |
 | `PickupBatch` → `Order` | 1 : N | Has many | Future: a batch contains multiple orders |
@@ -693,12 +617,21 @@ erDiagram
         datetime updatedAt
     }
 
-    Order {
+    OrderRequest {
         int id PK
         int harvestListingId FK
         int priceOfferId FK
-        int farmerProfileId FK
-        int factoryProfileId FK
+        decimal quotedPricePerKg
+        string status
+        string closureReason
+        datetime createdAt
+        datetime updatedAt
+    }
+
+    Order {
+        int id PK
+        int orderRequestId FK
+        int harvestListingId FK
         decimal agreedPricePerKg
         decimal estimatedQuantityKg
         decimal actualCollectedWeightKg
@@ -708,7 +641,6 @@ erDiagram
         string collectionPoint
         text pickupNotes
         decimal estimatedTransportCostBdt
-        int pickupBatchId FK
         datetime createdAt
         datetime updatedAt
     }
@@ -742,10 +674,9 @@ erDiagram
     User ||--o| FactoryProfile : "has one"
     FarmerProfile ||--o{ HarvestListing : "has many"
     FactoryProfile ||--o{ PriceOffer : "has many"
-    HarvestListing ||--o{ Order : "has many"
-    PriceOffer ||--o{ Order : "has many"
-    FarmerProfile ||--o{ Order : "has many"
-    FactoryProfile ||--o{ Order : "has many"
+    HarvestListing ||--o{ OrderRequest : "receives"
+    PriceOffer ||--o{ OrderRequest : "supplies the quote"
+    OrderRequest ||--o| Order : "creates"
     Order ||--o| Payment : "has one"
     FactoryProfile ||--o{ PickupBatch : "has many"
     PickupBatch ||--o{ Order : "groups"
@@ -778,11 +709,11 @@ erDiagram
 | `price_offer` | `factoryProfileId` | INDEX | Factory's offers |
 | `price_offer` | `status, validUntil` | COMPOSITE | Active offer query |
 | `price_offer` | `teaGrade` | INDEX | Filter by grade |
-| `order` | `id` | PK | — |
-| `order` | `farmerProfileId, orderStatus` | COMPOSITE | Farmer's order dashboard |
-| `order` | `factoryProfileId, orderStatus` | COMPOSITE | Factory's order dashboard |
-| `order` | `harvestListingId` | INDEX | Check listing's orders |
-| `order` | `priceOfferId` | INDEX | Orders for an offer |
+| `order_requests` | `harvestListingId, status` | COMPOSITE | Incoming requests and competing requests |
+| `order_requests` | `priceOfferId` | INDEX | Factory's requests through its offers |
+| `order_requests` | `harvestListingId, priceOfferId` | PARTIAL UNIQUE | One pending request for each listing and offer pair |
+| `orders` | `orderRequestId` | UNIQUE | One order per accepted request |
+| `orders` | `harvestListingId` | INDEX and PARTIAL UNIQUE | Order history and one reservation or completed sale |
 | `payment` | `id` | PK | — |
 | `payment` | `orderId` | UNIQUE | One payment per order |
 | `payment` | `paymentStatus` | INDEX | Filter by payment status |
@@ -798,7 +729,8 @@ erDiagram
 | Agreed price is immutable | Service layer | `agreedPricePerKg` is set once at order creation; no update path exists for it |
 | Only verified factory can create offers | Service layer | Check `factoryProfile.isVerified` before creating a `PriceOffer` |
 | Only the farmer who owns the listing can create/cancel it | Service layer | Compare `harvestListing.farmerProfileId` with `req.user.farmerProfileId` |
-| Only the factory who owns the offer can accept/reject orders | Service layer | Compare `order.factoryProfileId` with `req.user.factoryProfileId` |
+| Only the grower who owns the listing can accept or reject a request | Service layer | Resolve ownership through the listing's farmer profile inside the transaction |
+| One reserved or sold order per listing | Database | Partial unique index on the listing for active and completed orders |
 | Valid order status transitions only | Service layer | Transition table checked in `OrdersService.updateStatus()` |
 | Valid payment status transitions only | Service layer | Transition table checked in `OrdersService.updatePaymentStatus()` |
 | One farmer profile per user | Database | UNIQUE constraint on `farmer_profile.userId` |

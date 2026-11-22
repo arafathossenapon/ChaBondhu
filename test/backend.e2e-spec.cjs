@@ -23,6 +23,16 @@ const {
   CreatePriceOffers1795300100000,
 } = require("../dist/database/migrations/1795300100000-CreatePriceOffers");
 const {
+  CreateOrderRequestsAndOrders1795390000000,
+} = require("../dist/database/migrations/1795390000000-CreateOrderRequestsAndOrders");
+const {
+  AddOrderPickupFields1795390100000,
+} = require("../dist/database/migrations/1795390100000-AddOrderPickupFields");
+const {
+  OrderRequest,
+} = require("../dist/modules/orders/entities/order-request.entity");
+const { Order } = require("../dist/modules/orders/entities/order.entity");
+const {
   PriceOffer,
 } = require("../dist/modules/offers/entities/price-offer.entity");
 const { OffersService } = require("../dist/modules/offers/offers.service");
@@ -133,6 +143,8 @@ describe("ChaBondhu backend", () => {
     );
     await new TrackFactoryVerificationReviews1795300000000().up(runner);
     await new CreatePriceOffers1795300100000().up(runner);
+    await new CreateOrderRequestsAndOrders1795390000000().up(runner);
+    await new AddOrderPickupFields1795390100000().up(runner);
     const legacyProfile = await runner.manager.findOneByOrFail(FactoryProfile, {
       userId: legacyFactory.id,
     });
@@ -153,6 +165,8 @@ describe("ChaBondhu backend", () => {
       FactoryProfile,
       HarvestListing,
       PriceOffer,
+      OrderRequest,
+      Order,
     ]) {
       testingModule
         .overrideProvider(getRepositoryToken(entity))
@@ -1168,6 +1182,638 @@ describe("ChaBondhu backend", () => {
         (await runner.manager.findOneByOrFail(PriceOffer, { id: withdrawn }))
           .status,
       ).toBe("WITHDRAWN");
+    });
+  });
+
+  describe("order requests and confirmed orders", () => {
+    const bearer = { type: "bearer" };
+    let growerToken;
+    let buyerOne;
+    let buyerTwo;
+    let pendingBuyer;
+
+    async function createBuyer(email, verify = true) {
+      const { body: user } = await api
+        .post("/auth/register")
+        .send({ ...factory, email })
+        .expect(201);
+      const token = await login(email);
+      const { body: profile } = await api
+        .post("/factory-profiles")
+        .auth(token, bearer)
+        .send(factoryProfile)
+        .expect(201);
+      if (verify)
+        await api
+          .patch(`/admin/users/${user.id}/verify`)
+          .auth(adminToken, bearer)
+          .expect(200);
+      return { token, profile };
+    }
+
+    async function createListing(changes = {}) {
+      const { body } = await api
+        .post("/listings")
+        .auth(growerToken, bearer)
+        .send({
+          ...listing,
+          teaGrade: " CTC ",
+          estimatedQuantityKg: 150,
+          ...changes,
+        })
+        .expect(201);
+      return body;
+    }
+
+    async function createOffer(buyer, changes = {}) {
+      const { body } = await api
+        .post("/offers")
+        .auth(buyer.token, bearer)
+        .send({ ...offer, teaGrade: "ctc", ...changes })
+        .expect(201);
+      return body;
+    }
+
+    function submit(token, harvestListingId, priceOfferId) {
+      return api
+        .post("/order-requests")
+        .auth(token, bearer)
+        .send({ harvestListingId, priceOfferId });
+    }
+
+    beforeAll(async () => {
+      const email = "requests-grower@example.com";
+      await api
+        .post("/auth/register")
+        .send({ ...grower, email })
+        .expect(201);
+      growerToken = await login(email);
+      await api
+        .post("/farmer-profiles")
+        .auth(growerToken, bearer)
+        .send({ ...farm, district: "Thakurgaon" })
+        .expect(201);
+      buyerOne = await createBuyer("requests-buyer-one@example.com");
+      buyerTwo = await createBuyer("requests-buyer-two@example.com");
+      pendingBuyer = await createBuyer(
+        "requests-buyer-pending@example.com",
+        false,
+      );
+    });
+
+    it("allows competing factories, rejects duplicates across offers, and scopes paginated reads", async () => {
+      const batch = await createListing();
+      const firstOffer = await createOffer(buyerOne);
+      const secondOffer = await createOffer(buyerTwo);
+      const { body: first } = await submit(
+        buyerOne.token,
+        batch.id,
+        firstOffer.id,
+      ).expect(201);
+      const duplicateOffer = await createOffer(buyerOne);
+      await submit(buyerOne.token, batch.id, duplicateOffer.id).expect(409);
+      const { body: second } = await submit(
+        buyerTwo.token,
+        batch.id,
+        secondOffer.id,
+      ).expect(201);
+      expect(first).toMatchObject({
+        status: "PENDING",
+        quotedPricePerKg: firstOffer.pricePerKg,
+        factoryProfile: { id: buyerOne.profile.id },
+      });
+      expect(Object.keys(first.factoryProfile).sort()).toEqual([
+        "district",
+        "factoryName",
+        "id",
+      ]);
+      const listingsPath = `/listings/${batch.id}/order-requests`;
+      const owned = await api
+        .get(listingsPath)
+        .auth(growerToken, bearer)
+        .query({ limit: 1, status: "PENDING" })
+        .expect(200);
+      expect(owned.body).toMatchObject({
+        total: 2,
+        totalPages: 2,
+        page: 1,
+        data: [{ id: second.id }],
+      });
+      await api.get(listingsPath).auth(otherGrowerToken, bearer).expect(404);
+      await api.get(listingsPath).auth(buyerOne.token, bearer).expect(403);
+      const own = await api
+        .get("/order-requests/my")
+        .auth(buyerOne.token, bearer)
+        .expect(200);
+      expect(own.body.data).toContainEqual(
+        expect.objectContaining({ id: first.id }),
+      );
+      expect(own.body.data).not.toContainEqual(
+        expect.objectContaining({ id: second.id }),
+      );
+      await api.get("/order-requests/my").auth(growerToken, bearer).expect(403);
+    });
+
+    it("requires a verified offer owner and validates combinations, fields, and quantities", async () => {
+      const batch = await createListing();
+      const eligible = await createOffer(buyerOne);
+      const wrongGrade = await createOffer(buyerOne, { teaGrade: "Green" });
+      const oversized = await createOffer(buyerOne, {
+        minimumQuantityKg: 150.001,
+      });
+      const ownedByPending = await runner.manager.save(PriceOffer, {
+        ...offer,
+        factoryProfileId: pendingBuyer.profile.id,
+      });
+      await api
+        .post("/order-requests")
+        .send({ harvestListingId: batch.id, priceOfferId: eligible.id })
+        .expect(401);
+      await submit(growerToken, batch.id, eligible.id).expect(403);
+      await submit(pendingBuyer.token, batch.id, ownedByPending.id).expect(403);
+      await submit(buyerTwo.token, batch.id, eligible.id).expect(404);
+      await submit(buyerOne.token, 2147483647, eligible.id).expect(404);
+      await submit(buyerOne.token, batch.id, wrongGrade.id).expect(409);
+      await submit(buyerOne.token, batch.id, oversized.id).expect(409);
+      await api
+        .post("/order-requests")
+        .auth(buyerOne.token, bearer)
+        .send({
+          harvestListingId: batch.id,
+          priceOfferId: eligible.id,
+          quotedPricePerKg: 0,
+        })
+        .expect(400);
+      await api
+        .patch(`/offers/${eligible.id}/withdraw`)
+        .auth(buyerOne.token, bearer)
+        .expect(200);
+      await submit(buyerOne.token, batch.id, eligible.id).expect(409);
+    });
+
+    it("accepts one request atomically, reserves the listing, and copies the submitted price and current estimate", async () => {
+      const batch = await createListing();
+      const firstOffer = await createOffer(buyerOne);
+      const secondOffer = await createOffer(buyerTwo);
+      const { body: winner } = await submit(
+        buyerOne.token,
+        batch.id,
+        firstOffer.id,
+      ).expect(201);
+      const { body: competitor } = await submit(
+        buyerTwo.token,
+        batch.id,
+        secondOffer.id,
+      ).expect(201);
+      await api
+        .patch(`/offers/${firstOffer.id}`)
+        .auth(buyerOne.token, bearer)
+        .send({ pricePerKg: 35 })
+        .expect(200);
+      await api
+        .patch(`/listings/${batch.id}`)
+        .auth(growerToken, bearer)
+        .send({ estimatedQuantityKg: 175.125 })
+        .expect(200);
+      await api
+        .patch(`/order-requests/${winner.id}/accept`)
+        .auth(otherGrowerToken, bearer)
+        .expect(404);
+      await api
+        .patch(`/order-requests/${winner.id}/accept`)
+        .auth(buyerOne.token, bearer)
+        .expect(403);
+      const accepted = await api
+        .patch(`/order-requests/${winner.id}/accept`)
+        .auth(growerToken, bearer)
+        .expect(200);
+      expect(accepted.body).toMatchObject({
+        request: {
+          status: "ACCEPTED",
+          quotedPricePerKg: firstOffer.pricePerKg,
+        },
+        order: {
+          orderRequestId: winner.id,
+          harvestListingId: batch.id,
+          agreedPricePerKg: firstOffer.pricePerKg,
+          estimatedQuantityKg: 175.125,
+          actualCollectedWeightKg: null,
+          orderStatus: "ACCEPTED",
+          paymentStatus: "PENDING",
+        },
+      });
+      const retry = await api
+        .patch(`/order-requests/${winner.id}/accept`)
+        .auth(growerToken, bearer)
+        .expect(200);
+      expect(retry.body.order.id).toBe(accepted.body.order.id);
+      expect(
+        await runner.manager.countBy(Order, { harvestListingId: batch.id }),
+      ).toBe(1);
+      expect(
+        await runner.manager.findOneByOrFail(OrderRequest, {
+          id: competitor.id,
+        }),
+      ).toMatchObject({
+        status: "CLOSED",
+        closureReason: "ANOTHER_REQUEST_ACCEPTED",
+      });
+      expect(
+        await runner.manager.findOneByOrFail(HarvestListing, { id: batch.id }),
+      ).toMatchObject({ status: "RESERVED", isActive: true });
+      await api
+        .patch(`/order-requests/${competitor.id}/accept`)
+        .auth(growerToken, bearer)
+        .expect(409);
+      await api
+        .patch(`/listings/${batch.id}/cancel`)
+        .auth(growerToken, bearer)
+        .expect(409);
+      await api
+        .patch(`/listings/${batch.id}`)
+        .auth(growerToken, bearer)
+        .send({ notes: "late edit" })
+        .expect(409);
+      await submit(buyerTwo.token, batch.id, secondOffer.id).expect(409);
+    });
+
+    it("rechecks offer validity, verification, and quantity at acceptance", async () => {
+      const batch = await createListing();
+      const firstOffer = await createOffer(buyerOne);
+      const secondOffer = await createOffer(buyerTwo);
+      const { body: first } = await submit(
+        buyerOne.token,
+        batch.id,
+        firstOffer.id,
+      ).expect(201);
+      const { body: second } = await submit(
+        buyerTwo.token,
+        batch.id,
+        secondOffer.id,
+      ).expect(201);
+      const accept = (id) =>
+        api.patch(`/order-requests/${id}/accept`).auth(growerToken, bearer);
+      await api
+        .patch(`/offers/${firstOffer.id}/withdraw`)
+        .auth(buyerOne.token, bearer)
+        .expect(200);
+      await accept(first.id).expect(409);
+      await runner.manager.update(PriceOffer, secondOffer.id, {
+        validUntil: "2001-01-01",
+      });
+      await accept(second.id).expect(409);
+      await runner.manager.update(PriceOffer, secondOffer.id, {
+        validUntil: offer.validUntil,
+      });
+      await runner.manager.update(FactoryProfile, buyerTwo.profile.id, {
+        verificationStatus: "REJECTED",
+      });
+      await accept(second.id).expect(409);
+      await runner.manager.update(FactoryProfile, buyerTwo.profile.id, {
+        verificationStatus: "VERIFIED",
+      });
+      await api
+        .patch(`/listings/${batch.id}`)
+        .auth(growerToken, bearer)
+        .send({ estimatedQuantityKg: 90 })
+        .expect(200);
+      await accept(second.id).expect(409);
+      expect(
+        await runner.manager.countBy(Order, { harvestListingId: batch.id }),
+      ).toBe(0);
+    });
+
+    it("supports rejecting, withdrawing, resubmitting, and closing requests during listing moderation or cancellation", async () => {
+      const batch = await createListing();
+      const proposed = await createOffer(buyerOne);
+      const { body: first } = await submit(
+        buyerOne.token,
+        batch.id,
+        proposed.id,
+      ).expect(201);
+      await api
+        .patch(`/order-requests/${first.id}/withdraw`)
+        .auth(buyerTwo.token, bearer)
+        .expect(404);
+      const rejected = await api
+        .patch(`/order-requests/${first.id}/reject`)
+        .auth(growerToken, bearer)
+        .expect(200);
+      expect(rejected.body.status).toBe("REJECTED");
+      const { body: second } = await submit(
+        buyerOne.token,
+        batch.id,
+        proposed.id,
+      ).expect(201);
+      const withdrawn = await api
+        .patch(`/order-requests/${second.id}/withdraw`)
+        .auth(buyerOne.token, bearer)
+        .expect(200);
+      expect(withdrawn.body.status).toBe("WITHDRAWN");
+      const { body: third } = await submit(
+        buyerOne.token,
+        batch.id,
+        proposed.id,
+      ).expect(201);
+      await api
+        .delete(`/listings/${batch.id}`)
+        .auth(adminToken, bearer)
+        .expect(200);
+      expect(
+        await runner.manager.findOneByOrFail(OrderRequest, { id: third.id }),
+      ).toMatchObject({
+        status: "CLOSED",
+        closureReason: "LISTING_UNAVAILABLE",
+      });
+      const cancelled = await createListing();
+      const { body: fourth } = await submit(
+        buyerOne.token,
+        cancelled.id,
+        proposed.id,
+      ).expect(201);
+      await api
+        .patch(`/listings/${cancelled.id}/cancel`)
+        .auth(growerToken, bearer)
+        .expect(200);
+      expect(
+        await runner.manager.findOneByOrFail(OrderRequest, { id: fourth.id }),
+      ).toMatchObject({
+        status: "CLOSED",
+        closureReason: "LISTING_UNAVAILABLE",
+      });
+    });
+
+    async function acceptOrder(batch, buyer = buyerOne) {
+      const proposed = await createOffer(buyer);
+      const { body: pending } = await submit(
+        buyer.token,
+        batch.id,
+        proposed.id,
+      ).expect(201);
+      const { body } = await api
+        .patch(`/order-requests/${pending.id}/accept`)
+        .auth(growerToken, bearer)
+        .expect(200);
+      return body.order;
+    }
+
+    it("exposes confirmed orders only to their participants and admins", async () => {
+      const batch = await createListing();
+      const order = await acceptOrder(batch);
+      const path = `/orders/${order.id}`;
+      await api.get(path).expect(401);
+      for (const token of [growerToken, buyerOne.token, adminToken]) {
+        const result = await api.get(path).auth(token, bearer).expect(200);
+        expect(result.body).toMatchObject({
+          id: order.id,
+          harvestListing: { id: batch.id },
+          factoryProfile: { id: buyerOne.profile.id },
+          orderStatus: "ACCEPTED",
+          paymentStatus: "PENDING",
+        });
+        expect(Object.keys(result.body.factoryProfile).sort()).toEqual([
+          "district",
+          "factoryName",
+          "id",
+        ]);
+        expect(Object.keys(result.body.farmerProfile).sort()).toEqual([
+          "district",
+          "gardenName",
+          "id",
+        ]);
+      }
+      for (const token of [otherGrowerToken, buyerTwo.token]) {
+        await api.get(path).auth(token, bearer).expect(404);
+        const own = await api.get("/orders/my").auth(token, bearer).expect(200);
+        expect(own.body.data).not.toContainEqual(
+          expect.objectContaining({ id: order.id }),
+        );
+      }
+      await api.get("/orders/my").auth(adminToken, bearer).expect(403);
+      await api
+        .get("/orders/my")
+        .auth(growerToken, bearer)
+        .query({ limit: 101 })
+        .expect(400);
+      const list = await api
+        .get("/orders/my")
+        .auth(buyerOne.token, bearer)
+        .query({ orderStatus: "ACCEPTED", paymentStatus: "PENDING", limit: 1 })
+        .expect(200);
+      expect(list.body).toMatchObject({
+        page: 1,
+        limit: 1,
+        data: [{ id: order.id }],
+      });
+    });
+
+    it("lets only the owning grower cancel before pickup and reopens an eligible listing for new requests", async () => {
+      const batch = await createListing();
+      const otherOffer = await createOffer(buyerTwo);
+      const { body: competing } = await submit(
+        buyerTwo.token,
+        batch.id,
+        otherOffer.id,
+      ).expect(201);
+      const order = await acceptOrder(batch);
+      const path = `/orders/${order.id}/status`;
+      const cancel = { orderStatus: "CANCELLED" };
+      await api
+        .patch(path)
+        .auth(buyerOne.token, bearer)
+        .send(cancel)
+        .expect(403);
+      await api
+        .patch(path)
+        .auth(otherGrowerToken, bearer)
+        .send(cancel)
+        .expect(404);
+      const result = await api
+        .patch(path)
+        .auth(growerToken, bearer)
+        .send(cancel)
+        .expect(200);
+      expect(result.body).toMatchObject({
+        orderStatus: "CANCELLED",
+        paymentStatus: "PENDING",
+        agreedPricePerKg: order.agreedPricePerKg,
+        estimatedQuantityKg: order.estimatedQuantityKg,
+      });
+      await api.patch(path).auth(growerToken, bearer).send(cancel).expect(409);
+      expect(
+        await runner.manager.findOneByOrFail(HarvestListing, { id: batch.id }),
+      ).toMatchObject({ status: "ACTIVE", isActive: true });
+      expect(
+        await runner.manager.findOneByOrFail(OrderRequest, {
+          id: competing.id,
+        }),
+      ).toMatchObject({ status: "CLOSED" });
+      const next = (
+        await submit(buyerTwo.token, batch.id, otherOffer.id).expect(201)
+      ).body;
+      expect(next.id).not.toBe(competing.id);
+      await api
+        .patch(`/order-requests/${next.id}/accept`)
+        .auth(growerToken, bearer)
+        .expect(200);
+      expect(
+        await runner.manager.countBy(Order, { harvestListingId: batch.id }),
+      ).toBe(2);
+    });
+
+    it("does not reopen a moderated listing when its accepted order is cancelled", async () => {
+      const batch = await createListing();
+      const order = await acceptOrder(batch);
+      await api
+        .delete(`/listings/${batch.id}`)
+        .auth(adminToken, bearer)
+        .expect(200);
+      await api
+        .patch(`/orders/${order.id}/status`)
+        .auth(growerToken, bearer)
+        .send({ orderStatus: "CANCELLED" })
+        .expect(200);
+      expect(
+        await runner.manager.findOneByOrFail(HarvestListing, { id: batch.id }),
+      ).toMatchObject({ status: "CANCELLED", isActive: false });
+    });
+
+    it("lets the owning factory schedule pickup and collect weight without changing the snapshots or payment", async () => {
+      const batch = await createListing();
+      const order = await acceptOrder(batch);
+      const path = `/orders/${order.id}/status`;
+      const pickup = {
+        orderStatus: "PICKUP_SCHEDULED",
+        proposedCollectionDate: "2099-12-18",
+        collectionPoint: "  Tetulia collection point  ",
+        pickupNotes: "Truck arrives at 9 AM",
+        estimatedTransportCostBdt: 500.25,
+      };
+      await api.patch(path).auth(growerToken, bearer).send(pickup).expect(403);
+      await api.patch(path).auth(adminToken, bearer).send(pickup).expect(403);
+      await api
+        .patch(path)
+        .auth(buyerTwo.token, bearer)
+        .send(pickup)
+        .expect(404);
+      await api
+        .patch(path)
+        .auth(buyerOne.token, bearer)
+        .send({ orderStatus: "COLLECTED", actualCollectedWeightKg: 142.75 })
+        .expect(409);
+      const scheduled = await api
+        .patch(path)
+        .auth(buyerOne.token, bearer)
+        .send(pickup)
+        .expect(200);
+      expect(scheduled.body).toMatchObject({
+        ...pickup,
+        collectionPoint: "Tetulia collection point",
+        paymentStatus: "PENDING",
+        actualCollectedWeightKg: null,
+        estimatedQuantityKg: batch.estimatedQuantityKg,
+      });
+      await api
+        .patch(path)
+        .auth(growerToken, bearer)
+        .send({ orderStatus: "CANCELLED" })
+        .expect(409);
+      await api
+        .patch(path)
+        .auth(buyerOne.token, bearer)
+        .send(pickup)
+        .expect(409);
+      const collected = await api
+        .patch(path)
+        .auth(buyerOne.token, bearer)
+        .send({ orderStatus: "COLLECTED", actualCollectedWeightKg: 142.75 })
+        .expect(200);
+      expect(collected.body).toMatchObject({
+        orderStatus: "COLLECTED",
+        paymentStatus: "PENDING",
+        actualCollectedWeightKg: 142.75,
+        agreedPricePerKg: order.agreedPricePerKg,
+        estimatedQuantityKg: order.estimatedQuantityKg,
+        collectionPoint: "Tetulia collection point",
+        proposedCollectionDate: pickup.proposedCollectionDate,
+      });
+      const growerRead = await api
+        .get(`/orders/${order.id}`)
+        .auth(growerToken, bearer)
+        .expect(200);
+      expect(growerRead.body).toEqual(collected.body);
+      await api
+        .patch(path)
+        .auth(buyerOne.token, bearer)
+        .send({ orderStatus: "COMPLETED" })
+        .expect(400);
+      expect(
+        await runner.manager.findOneByOrFail(HarvestListing, { id: batch.id }),
+      ).toMatchObject({
+        status: "RESERVED",
+        estimatedQuantityKg: batch.estimatedQuantityKg,
+      });
+    });
+
+    it("rejects invalid pickup details, collection weight, and attempts to alter order snapshots", async () => {
+      const order = await acceptOrder(await createListing());
+      const edit = (dto) =>
+        api
+          .patch(`/orders/${order.id}/status`)
+          .auth(buyerOne.token, bearer)
+          .send(dto);
+      for (const changes of [
+        { orderStatus: "PICKUP_SCHEDULED" },
+        {
+          orderStatus: "PICKUP_SCHEDULED",
+          proposedCollectionDate: "2099-02-29",
+          collectionPoint: "Tetulia",
+        },
+        {
+          orderStatus: "PICKUP_SCHEDULED",
+          proposedCollectionDate: "2099-03-01",
+          collectionPoint: "  ",
+        },
+        {
+          orderStatus: "PICKUP_SCHEDULED",
+          proposedCollectionDate: "2099-03-01",
+          collectionPoint: "Tetulia",
+          estimatedTransportCostBdt: -1,
+        },
+        {
+          orderStatus: "PICKUP_SCHEDULED",
+          proposedCollectionDate: "2099-03-01",
+          collectionPoint: "Tetulia",
+          actualCollectedWeightKg: 12,
+        },
+        { orderStatus: "COLLECTED" },
+        { orderStatus: "COLLECTED", actualCollectedWeightKg: -1 },
+        { orderStatus: "COLLECTED", actualCollectedWeightKg: 142.7501 },
+        { orderStatus: "COLLECTED", actualCollectedWeightKg: "142.75" },
+        {
+          orderStatus: "COLLECTED",
+          actualCollectedWeightKg: 142.75,
+          estimatedQuantityKg: 1,
+        },
+        {
+          orderStatus: "COLLECTED",
+          actualCollectedWeightKg: 142.75,
+          paymentStatus: "COMPLETED",
+        },
+        {
+          orderStatus: "COLLECTED",
+          actualCollectedWeightKg: 142.75,
+          agreedPricePerKg: 1,
+        },
+      ])
+        await edit(changes).expect(400);
+      expect(
+        await runner.manager.findOneByOrFail(Order, { id: order.id }),
+      ).toMatchObject({
+        orderStatus: "ACCEPTED",
+        paymentStatus: "PENDING",
+        actualCollectedWeightKg: null,
+      });
     });
   });
 

@@ -99,7 +99,7 @@ ChaBondhu uses **one NestJS module per domain feature**. Each module is self-con
 | `ListingsModule` | Harvest listing CRUD and status (`/listings`) | `ListingsModule` |
 | `FactoryProfilesModule` | Factory profile CRUD (`/factory-profiles`) | `FactoryProfilesModule` |
 | `OffersModule` | Price offer management (`/offers`) | `OffersModule` |
-| `OrdersModule` | Order workflow and status transitions (`/orders`) | `OrdersModule` |
+| `OrdersModule` | Factory requests, grower decisions, confirmed orders, and pickup | `OrdersModule` |
 | `PaymentsModule` | Payment record management (`/payments`) | `PaymentsModule` |
 | `AdminModule` | Admin endpoints (`/admin`) | `AdminModule` |
 | `CommonModule` | Shared guards, decorators, utilities | — |
@@ -151,7 +151,7 @@ flowchart TD
     OrdersModule --> OffersModule
     OrdersModule --> FarmerProfilesModule
     OrdersModule --> FactoryProfilesModule
-    OrdersModule --> PaymentsModule
+    PaymentsModule --> OrdersModule
 
     AdminModule --> UsersModule
     AdminModule --> ListingsModule
@@ -479,7 +479,7 @@ All business logic lives in **service classes**. Controllers never contain condi
 | Rule | Service | Method |
 |---|---|---|
 | Hash password before saving | `AuthService` | `register()` |
-| Copy `agreedPricePerKg` from offer at order creation | `OrdersService` | `createOrder()` |
+| Snapshot the offer price on submission and copy the request quote on acceptance | `OrderRequestsService` | `submit()`, `accept()` |
 | Validate order status transitions | `OrdersService` | `updateOrderStatus()` |
 | Validate payment status transitions | `OrdersService` | `updatePaymentStatus()` |
 | Check listing belongs to requesting farmer | `ListingsService` | `create()`, `update()`, `cancel()` |
@@ -496,15 +496,15 @@ All business logic lives in **service classes**. Controllers never contain condi
 
 ```typescript
 const VALID_ORDER_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
-  [OrderStatus.REQUESTED]:        [OrderStatus.ACCEPTED, OrderStatus.REJECTED],
   [OrderStatus.ACCEPTED]:         [OrderStatus.PICKUP_SCHEDULED, OrderStatus.CANCELLED],
-  [OrderStatus.REJECTED]:         [],   // Terminal
   [OrderStatus.PICKUP_SCHEDULED]: [OrderStatus.COLLECTED],
   [OrderStatus.COLLECTED]:        [OrderStatus.COMPLETED],
   [OrderStatus.COMPLETED]:        [],   // Terminal
   [OrderStatus.CANCELLED]:        [],   // Terminal
 };
 ```
+
+Requests have their own statuses. A grower can accept or reject a pending request, and its factory can withdraw it. Acceptance locks the listing first, creates an order, sets the listing to `RESERVED`, and closes competing requests in one transaction. Phase 7 implements transitions through collection. Completion follows confirmed payment in a later phase.
 
 ### 9.2 Payment Status Transition Table (Enforced in Service)
 
@@ -587,7 +587,7 @@ This serves as the primary tool for testing the API during development, alongsid
 | `ListingsModule` | `HarvestListing` | `POST`, `GET /`, `GET /my`, `GET /:id`, `PATCH /:id`, `PATCH /:id/cancel`, `DELETE /:id` | CRUD; ownership check; cancellation guard |
 | `FactoryProfilesModule` | `FactoryProfile` | `POST`, `GET /me`, `GET /:id`, `PATCH /me` | CRUD; enforce one-per-user |
 | `OffersModule` | `PriceOffer` | `POST /offers`, `GET /offers`, `GET /offers/my`, `GET /offers/:id`, `PATCH /offers/:id`, `PATCH /offers/:id/withdraw` | Publishing and editing check factory verification. Owner writes lock the offer before checking its state. Public reads apply the expiry cutoff, and an in-process job persists expiry at startup and every minute. |
-| `OrdersModule` | `Order` | `POST`, `GET /my`, `GET /:id`, `PATCH /:id/status`, `PATCH /:id/payment-status` | Order creation; state machine; price copying; authorization |
+| `OrdersModule` | `OrderRequest`, `Order` | `/order-requests`, `/listings/:id/order-requests`, `/orders/my`, `/orders/:id`, `/orders/:id/status` | Verifies ownership and eligibility, reserves listings atomically, and handles cancellation, pickup, and collection |
 | `PaymentsModule` | `Payment` | `GET /order/:orderId` | Retrieve payment record; calculate total |
 | `AdminModule` | — | `/admin/users/*`, `/admin/listings`, `/admin/orders` | Cross-module admin queries; verification; deactivation |
 | `CommonModule` | — | — | Guards, decorators, shared enums |

@@ -8,22 +8,8 @@ import {
   Matches,
   Max,
   Min,
-  ValidateBy,
 } from "class-validator";
-
-function IsDecimalNumber(places: number): PropertyDecorator {
-  return ValidateBy({
-    name: "isDecimalNumber",
-    validator: {
-      validate: (value: unknown) =>
-        typeof value === "number" &&
-        Number.isFinite(value) &&
-        Number(value.toFixed(places)) === value,
-      defaultMessage: () =>
-        `Value must be a number with up to ${places} decimal places`,
-    },
-  });
-}
+import { IsDecimalNumber } from "@/common/validations/is-decimal-number.decorator";
 
 export class CreatePriceOfferDto {
   @ApiProperty({ example: "CTC", minLength: 1, maxLength: 100 })
