@@ -5,7 +5,7 @@ import {
   ConflictException,
 } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
-import { Repository } from "typeorm";
+import { EntityManager, Repository } from "typeorm";
 import { HarvestListing } from "./entities/harvest-listing.entity";
 import { CreateHarvestListingDto } from "./dto/create-harvest-listing.dto";
 import { UpdateHarvestListingDto } from "./dto/update-harvest-listing.dto";
@@ -14,6 +14,10 @@ import { FarmerProfilesService } from "@/modules/farmer-profiles/farmer-profiles
 import { ListingStatus } from "@/common/enums/listing-status.enum";
 import { AuthUser } from "@/common/interfaces/auth-user.interface";
 import { Role } from "@/common/enums/role.enum";
+import { FarmerProfile } from "@/modules/farmer-profiles/entities/farmer-profile.entity";
+import { closePendingRequests } from "@/modules/orders/close-pending-requests";
+import { OrderRequestClosureReason } from "@/modules/orders/order-status";
+import { lockHarvestListing } from "./lock-harvest-listing";
 
 @Injectable()
 export class ListingsService {
@@ -124,93 +128,44 @@ export class ListingsService {
     userId: number,
     updateDto: UpdateHarvestListingDto,
   ): Promise<HarvestListing> {
-    const listing = await this.harvestListingRepository.findOne({
-      where: { id },
-      relations: ["farmerProfile"],
+    return this.harvestListingRepository.manager.transaction(async (manager) => {
+      const listing = await this.lockOwnListing(manager, id, userId);
+      if (!listing.isActive || listing.status !== ListingStatus.ACTIVE) {
+        throw new ConflictException("Only active listings can be updated");
+      }
+      const repository = manager.getRepository(HarvestListing);
+      return repository.save(repository.merge(listing, updateDto));
     });
-
-    if (!listing) {
-      throw new NotFoundException(`Harvest listing with ID ${id} not found`);
-    }
-
-    if (!listing.farmerProfile || listing.farmerProfile.userId !== userId) {
-      throw new ForbiddenException(
-        "You do not have permission to update this listing",
-      );
-    }
-
-    if (listing.status !== ListingStatus.ACTIVE) {
-      throw new ConflictException("Only active listings can be updated");
-    }
-
-    if (updateDto.teaGrade !== undefined) {
-      listing.teaGrade = updateDto.teaGrade;
-    }
-    if (updateDto.estimatedQuantityKg !== undefined) {
-      listing.estimatedQuantityKg = updateDto.estimatedQuantityKg;
-    }
-    if (updateDto.expectedHarvestDate !== undefined) {
-      listing.expectedHarvestDate = updateDto.expectedHarvestDate;
-    }
-    if (updateDto.lastHarvestDate !== undefined) {
-      listing.lastHarvestDate = updateDto.lastHarvestDate;
-    }
-    if (updateDto.qualityDescription !== undefined) {
-      listing.qualityDescription = updateDto.qualityDescription;
-    }
-    if (updateDto.collectionLocation !== undefined) {
-      listing.collectionLocation = updateDto.collectionLocation;
-    }
-    if (updateDto.notes !== undefined) {
-      listing.notes = updateDto.notes;
-    }
-
-    return this.harvestListingRepository.save(listing);
   }
 
   async cancel(id: number, userId: number): Promise<HarvestListing> {
-    const listing = await this.harvestListingRepository.findOne({
-      where: { id },
-      relations: ["farmerProfile"],
+    return this.harvestListingRepository.manager.transaction(async (manager) => {
+      const listing = await this.lockOwnListing(manager, id, userId);
+      if (listing.status === ListingStatus.CANCELLED) return listing;
+      if (listing.status === ListingStatus.SOLD || listing.status === ListingStatus.RESERVED) {
+        throw new ConflictException("Cannot cancel a reserved or sold listing");
+      }
+      listing.status = ListingStatus.CANCELLED;
+      await closePendingRequests(manager, listing.id, OrderRequestClosureReason.LISTING_UNAVAILABLE);
+      return manager.save(HarvestListing, listing);
     });
-
-    if (!listing) {
-      throw new NotFoundException(`Harvest listing with ID ${id} not found`);
-    }
-
-    if (!listing.farmerProfile || listing.farmerProfile.userId !== userId) {
-      throw new ForbiddenException(
-        "You do not have permission to cancel this listing",
-      );
-    }
-
-    if (listing.status === ListingStatus.CANCELLED) {
-      return listing;
-    }
-
-    if (listing.status === ListingStatus.SOLD) {
-      throw new ConflictException("Cannot cancel a completed/sold listing");
-    }
-
-    // Note: Order dependency rule: Once OrdersModule is implemented,
-    // active order checks (ACCEPTED or later) will be enforced here.
-
-    listing.status = ListingStatus.CANCELLED;
-    return this.harvestListingRepository.save(listing);
   }
 
   async softDelete(id: number): Promise<{ message: string }> {
-    const listing = await this.harvestListingRepository.findOne({
-      where: { id },
+    return this.harvestListingRepository.manager.transaction(async (manager) => {
+      const listing = await lockHarvestListing(manager, id);
+      await manager.update(HarvestListing, listing.id, { isActive: false });
+      await closePendingRequests(manager, listing.id, OrderRequestClosureReason.LISTING_UNAVAILABLE);
+      return { message: "Listing has been deactivated." };
     });
+  }
 
-    if (!listing) {
-      throw new NotFoundException(`Harvest listing with ID ${id} not found`);
-    }
-
-    listing.isActive = false;
-    await this.harvestListingRepository.save(listing);
-
-    return { message: "Listing has been deactivated." };
+  private async lockOwnListing(manager: EntityManager, id: number, userId: number) {
+    // গ্রহণ ও তালিকার পরিবর্তন একই সারি লক করে, তাই সংরক্ষণ হারিয়ে যায় না।
+    const listing = await lockHarvestListing(manager, id);
+    const profile = await manager.findOneBy(FarmerProfile, { id: listing.farmerProfileId, userId });
+    if (!profile) throw new ForbiddenException("You do not own this listing");
+    listing.farmerProfile = profile;
+    return listing;
   }
 }

@@ -1027,14 +1027,18 @@ An offer remains valid through its `validUntil` day in `Asia/Dhaka`. The app che
 
 ---
 
-### 10.1 Create Order (Farmer Submits Request)
+### 10.1 Factory Requests and Grower Decisions
 
-**`POST /orders`**
+An order exists only after the grower accepts a request. Request routes require a JWT.
 
-| Property | Value |
-|---|---|
-| Auth | GROWER |
-| Description | Submit an order request linking the farmer's listing to a factory's price offer. |
+| Method and route | Role and scope | Input | Success |
+|---|---|---|---|
+| `POST /order-requests` | Verified FACTORY, using its own offer | `harvestListingId`, `priceOfferId` | `201` request with `status: "PENDING"` and an immutable quote |
+| `GET /listings/:id/order-requests` | GROWER who owns the listing | Optional `status`, `page`, `limit` | `200` paginated incoming requests |
+| `GET /order-requests/my` | FACTORY, scoped to its own offers | Optional `status`, `page`, `limit` | `200` paginated requests the factory submitted |
+| `PATCH /order-requests/:id/accept` | GROWER who owns the listing | No body | `200 { request, order }`. Retrying the accepted request returns the same order. |
+| `PATCH /order-requests/:id/reject` | GROWER who owns the listing | No body | `200` request with `status: "REJECTED"` |
+| `PATCH /order-requests/:id/withdraw` | FACTORY that submitted the request | No body | `200` request with `status: "WITHDRAWN"` |
 
 **Request Body:**
 
@@ -1047,35 +1051,49 @@ An offer remains valid through its `validUntil` day in `Asia/Dhaka`. The app che
 
 | Field | Type | Required | Rules |
 |---|---|---|---|
-| `harvestListingId` | number | Yes | Must be an `ACTIVE` listing owned by the authenticated farmer |
-| `priceOfferId` | number | Yes | Must be an `ACTIVE` offer |
+| `harvestListingId` | integer | Yes | Available `ACTIVE` harvest listing |
+| `priceOfferId` | integer | Yes | Active, unexpired offer owned by the authenticated factory |
 
 **Service Logic (checked in service layer):**
 - The listing must be `ACTIVE` and `isActive = true`.
 - The offer must be `ACTIVE` and not expired.
-- The listing must belong to the authenticated farmer.
-- The listing must not already have an `ACCEPTED` or later order against it.
-- `agreedPricePerKg` is set from `priceOffer.pricePerKg` at this moment and stored immutably.
+- Tea grades must match after trimming and case-insensitive comparison. The listing estimate must meet the offer's minimum quantity if one is set.
+- Factories may compete for a listing. Each factory may have one pending request for it, even if it has several offers.
+- Submission copies the offer price into `quotedPricePerKg`. Acceptance rechecks eligibility and copies the quote and the listing's current estimate into the order.
+- Acceptance reserves the listing and closes competing pending requests with `ANOTHER_REQUEST_ACCEPTED` in the same transaction. Listing cancellation and moderation close pending requests with `LISTING_UNAVAILABLE`.
 
-**Success Response — `201 Created`:**
+Example response to accepting a request:
 
 ```json
 {
-  "id": 88,
-  "harvestListingId": 12,
-  "priceOfferId": 5,
-  "farmerProfileId": 3,
-  "factoryProfileId": 2,
-  "agreedPricePerKg": "28.50",
-  "estimatedQuantityKg": "350.500",
-  "actualCollectedWeightKg": null,
-  "orderStatus": "REQUESTED",
-  "paymentStatus": "PENDING",
-  "proposedCollectionDate": null,
-  "collectionPoint": null,
-  "pickupNotes": null,
-  "estimatedTransportCostBdt": null,
-  "createdAt": "2026-11-05T10:00:00.000Z"
+  "request": {
+    "id": 40,
+    "harvestListingId": 12,
+    "priceOfferId": 5,
+    "quotedPricePerKg": 28.50,
+    "status": "ACCEPTED",
+    "closureReason": null,
+    "harvestListing": { "id": 12, "teaGrade": "CTC", "estimatedQuantityKg": 350.5 },
+    "factoryProfile": { "id": 2, "factoryName": "Panchagarh Tea Processing Ltd.", "district": "Panchagarh" },
+    "createdAt": "2026-11-22T10:00:00.000Z",
+    "updatedAt": "2026-11-22T10:30:00.000Z"
+  },
+  "order": {
+    "id": 88,
+    "orderRequestId": 40,
+    "harvestListingId": 12,
+    "agreedPricePerKg": 28.50,
+    "estimatedQuantityKg": 350.5,
+    "actualCollectedWeightKg": null,
+    "proposedCollectionDate": null,
+    "collectionPoint": null,
+    "pickupNotes": null,
+    "estimatedTransportCostBdt": null,
+    "orderStatus": "ACCEPTED",
+    "paymentStatus": "PENDING",
+    "createdAt": "2026-11-22T10:30:00.000Z",
+    "updatedAt": "2026-11-22T10:30:00.000Z"
+  }
 }
 ```
 
@@ -1083,11 +1101,13 @@ An offer remains valid through its `validUntil` day in `Asia/Dhaka`. The app che
 
 | Status | Condition |
 |---|---|
-| `400 Bad Request` | Missing fields |
-| `401 Unauthorized` | No token |
-| `403 Forbidden` | User is not a GROWER; listing does not belong to this farmer |
-| `404 Not Found` | Listing or offer not found |
-| `409 Conflict` | Listing is not ACTIVE; offer is expired or withdrawn; listing already has an accepted order |
+| `400 Bad Request` | Invalid identifiers, body, or query parameters |
+| `401 Unauthorized` | Missing or invalid token |
+| `403 Forbidden` | Wrong role or the submitting factory is unverified |
+| `404 Not Found` | Missing resource or outside the caller's ownership scope |
+| `409 Conflict` | Unavailable listing or offer, mismatch, duplicate pending request, or request no longer eligible for the action |
+
+Lists return `{ data, total, page, limit, totalPages }`, newest first. Pagination starts at 1 with a default limit of 20 and maximum of 100. Request statuses are `PENDING`, `ACCEPTED`, `REJECTED`, `CLOSED`, and `WITHDRAWN`.
 
 ---
 
@@ -1109,7 +1129,7 @@ An offer remains valid through its `validUntil` day in `Asia/Dhaka`. The app che
 | `page` | number | Page number |
 | `limit` | number | Items per page |
 
-**Success Response — `200 OK`:** Returns paginated list of orders with related data.
+**Success Response — `200 OK`:** Returns confirmed orders using `{ data, total, page, limit, totalPages }`, newest first. Pagination starts at 1 with a default limit of 20 and a maximum of 100. A malformed query returns `400`, missing authentication returns `401`, and a role other than GROWER or FACTORY returns `403`.
 
 ---
 
@@ -1119,18 +1139,18 @@ An offer remains valid through its `validUntil` day in `Asia/Dhaka`. The app che
 
 | Property | Value |
 |---|---|
-| Auth | Any Auth |
-| Description | Get full order details. A farmer can only see their own orders; a factory can only see orders against their offers; an admin can see all. |
+| Auth | GROWER or FACTORY participating in the order, or ADMIN |
+| Description | Read a confirmed order's snapshots, statuses, pickup details, and limited participant summaries |
 
-**Success Response — `200 OK`:** Returns the full `Order` with nested listing, offer, farmer, and factory data.
+**Success Response — `200 OK`:** Returns the same order fields shown in the acceptance response, plus `priceOfferId` and safe summaries for `harvestListing`, `farmerProfile`, and `factoryProfile`.
 
 **Error Cases:**
 
 | Status | Condition |
 |---|---|
-| `401 Unauthorized` | No token |
-| `403 Forbidden` | Authenticated user is not related to this order |
-| `404 Not Found` | Order not found |
+| `400 Bad Request` | Non-integer ID |
+| `401 Unauthorized` | Missing or invalid token |
+| `404 Not Found` | Order is missing or outside the participant's ownership scope |
 
 ---
 
@@ -1141,24 +1161,23 @@ An offer remains valid through its `validUntil` day in `Asia/Dhaka`. The app che
 | Property | Value |
 |---|---|
 | Auth | GROWER or FACTORY |
-| Description | Advance the order status. Only valid transitions are allowed. |
+| Description | Cancel an accepted order, schedule pickup, or record actual collection |
 
 **Request Body:**
 
 ```json
 {
-  "orderStatus": "ACCEPTED"
+  "orderStatus": "CANCELLED"
 }
 ```
 
-| Transition | Required Additional Fields |
-|---|---|
-| `REQUESTED → ACCEPTED` | None |
-| `REQUESTED → REJECTED` | None |
-| `ACCEPTED → PICKUP_SCHEDULED` | `proposedCollectionDate`, `collectionPoint` required |
-| `ACCEPTED → CANCELLED` | None (farmer only) |
-| `PICKUP_SCHEDULED → COLLECTED` | `actualCollectedWeightKg` required |
-| `COLLECTED → COMPLETED` | None |
+| Transition | Owner | Additional fields |
+|---|---|---|
+| `ACCEPTED → PICKUP_SCHEDULED` | FACTORY | Required `proposedCollectionDate` as `YYYY-MM-DD` and `collectionPoint`. Optional `pickupNotes` and non-negative `estimatedTransportCostBdt`. |
+| `ACCEPTED → CANCELLED` | GROWER | None |
+| `PICKUP_SCHEDULED → COLLECTED` | FACTORY | Required non-negative `actualCollectedWeightKg` with up to three decimal places |
+
+Cancellation reopens an eligible listing and leaves closed requests closed. A moderated listing remains unavailable. The listing stays `RESERVED` during pickup and collection. The API supports transitions through `COLLECTED` in Phase 7. Completion requires a future payment confirmation action.
 
 **Extended Request Body for `PICKUP_SCHEDULED`:**
 
@@ -1181,21 +1200,23 @@ An offer remains valid through its `validUntil` day in `Asia/Dhaka`. The app che
 }
 ```
 
-**Success Response — `200 OK`:** Returns the updated `Order` object.
+**Success Response — `200 OK`:** Returns the same order representation as the detail endpoint. Updating order status preserves the agreed price, estimated weight, and payment status.
 
 **Error Cases:**
 
 | Status | Condition |
 |---|---|
-| `400 Bad Request` | Invalid status value; missing required fields for the transition |
+| `400 Bad Request` | Invalid target status, missing required fields, or fields that do not belong to the transition |
 | `401 Unauthorized` | No token |
 | `403 Forbidden` | User is not authorized to make this transition |
-| `404 Not Found` | Order not found |
+| `404 Not Found` | Order is missing or outside the caller's ownership scope |
 | `409 Conflict` | Transition is not valid from the current status |
 
 ---
 
 ### 10.5 Update Payment Status
+
+Planned for the Payments phase.
 
 **`PATCH /orders/:id/payment-status`**
 
@@ -1438,6 +1459,8 @@ Signed-in profile readers can see `verificationStatus` and the derived `isVerifi
 
 ### 12.7 List All Orders (Admin View)
 
+Planned for broader admin oversight. Admins can already read an individual order through `GET /orders/:id`.
+
 **`GET /admin/orders`**
 
 | Property | Value |
@@ -1495,7 +1518,12 @@ Signed-in profile readers can see `verificationStatus` and the derived `isVerifi
 | `GET` | `/offers/:id` | Any Auth | Get offer by ID |
 | `PATCH` | `/offers/:id` | FACTORY | Update price offer |
 | `PATCH` | `/offers/:id/withdraw` | FACTORY | Withdraw price offer |
-| `POST` | `/orders` | GROWER | Create order request |
+| `POST` | `/order-requests` | Verified FACTORY | Submit a request against an available listing using an owned offer |
+| `GET` | `/listings/:id/order-requests` | Owning GROWER | Read requests for a listing |
+| `GET` | `/order-requests/my` | FACTORY | Read own requests |
+| `PATCH` | `/order-requests/:id/accept` | Owning GROWER | Accept request and create the order |
+| `PATCH` | `/order-requests/:id/reject` | Owning GROWER | Reject pending request |
+| `PATCH` | `/order-requests/:id/withdraw` | Owning FACTORY | Withdraw pending request |
 | `GET` | `/orders/my` | GROWER / FACTORY | Get own orders |
 | `GET` | `/orders/:id` | Any Auth | Get order by ID |
 | `PATCH` | `/orders/:id/status` | GROWER / FACTORY | Update order status |

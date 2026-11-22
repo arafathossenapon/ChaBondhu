@@ -58,7 +58,7 @@ Tea factories, on the other hand, may face challenges in finding sufficient quan
 | Connect farmers and factories | Provide a shared platform where both can find each other |
 | Price transparency | Let farmers see and compare offers from multiple factories |
 | Harvest listing management | Allow farmers to list available tea leaf batches |
-| Order coordination | Allow factories to respond to farmer order requests |
+| Order coordination | Let verified factories submit requests to growers and let the listing owner choose one |
 | Order tracking | Track order status from request through collection and payment |
 | Pickup scheduling | Allow factories to propose collection dates and logistics |
 | Payment record tracking | Record payment status without real money transfer |
@@ -99,12 +99,13 @@ ChaBondhu has three distinct user roles. Each role has access to different featu
 | Create / manage farm profile | ✅ | ❌ | ❌ |
 | Create harvest listings | ✅ | ❌ | ❌ |
 | Browse factory price offers | ✅ | ❌ | ❌ |
-| Submit order request to a factory | ✅ | ❌ | ❌ |
+| Submit a request against a harvest listing | ❌ | ✅ (verified) | ❌ |
 | Track own order status | ✅ | ✅ | ✅ |
 | Create / manage factory profile | ❌ | ✅ | ❌ |
 | Publish price offers | ❌ | ✅ | ❌ |
-| View incoming farmer orders | ❌ | ✅ | ❌ |
-| Accept or reject orders | ❌ | ✅ | ❌ |
+| View incoming requests for an owned listing | ✅ | ❌ | ❌ |
+| Accept or reject incoming requests | ✅ | ❌ | ❌ |
+| View or withdraw own pending requests | ❌ | ✅ | ❌ |
 | Confirm actual collected weight | ❌ | ✅ | ❌ |
 | Update collection / payment status | ❌ | ✅ | ❌ |
 | View all registered users | ❌ | ❌ | ✅ |
@@ -165,7 +166,7 @@ A farmer may create a harvest listing to indicate they have tea leaves available
 | Last harvest date | date | No | |
 | Harvest quality description | string | No | |
 | Collection location | string | Yes | Where leaves can be picked up |
-| Listing status | enum | Auto | `ACTIVE`, `SOLD`, `EXPIRED`, `CANCELLED` |
+| Listing status | enum | Auto | `ACTIVE`, `RESERVED`, `SOLD`, `EXPIRED`, `CANCELLED` |
 | Notes | string | No | Any additional information |
 
 **Business rules:**
@@ -182,10 +183,9 @@ A farmer may create a harvest listing to indicate they have tea leaves available
 
 ### 4.6 Order Request
 
-- A farmer may submit an order request to a factory by selecting one of the factory's active price offers.
-- The order request links: the farmer's listing + the factory's price offer.
-- Once an order request is submitted, the agreed price must be recorded and must not change even if the factory later updates their price offer.
-- A farmer may not submit more than one accepted order for the same listing.
+- A grower reviews requests submitted by verified factories against their available harvest listing and may reject a pending request or accept one.
+- Acceptance creates one order, reserves the listing, and closes competing pending requests in the same transaction.
+- Reserved listings cannot be normally edited or cancelled. When an eligible order is cancelled before pickup scheduling, an eligible listing may reopen. Earlier closed requests stay closed.
 
 ### 4.7 Order Tracking
 
@@ -243,17 +243,16 @@ A factory may publish price offers for tea leaves they wish to purchase.
 - Updating a price offer does not affect any orders already placed against that offer — the agreed price at order time is preserved.
 - Expired offers (past their `valid until` date) must automatically show as `EXPIRED` and not appear in active listings.
 
-### 5.5 Viewing Incoming Orders
+### 5.5 Submitting Order Requests
 
-- A factory must be able to view all order requests submitted by farmers against their offers.
-- Each order must show: farmer name, farm location, listing details, estimated quantity, and collection location.
+- A verified factory may request an available listing using one of its own active, unexpired offers. Tea grades must match after trimming and case-insensitive comparison, and the listing's estimate must meet the offer's minimum quantity.
+- A factory may have one pending request per listing. Different factories can have pending requests for the same listing.
+- Submission stores the offered price as an immutable quote. Acceptance rechecks verification, listing availability, and offer eligibility.
 
-### 5.6 Accepting or Rejecting Orders
+### 5.6 Viewing and Withdrawing Own Requests
 
-- A factory may accept or reject any order request in `REQUESTED` status.
-- If accepted: the order moves to `ACCEPTED` status and a pickup may be scheduled.
-- If rejected: the order moves to `REJECTED` status and the farmer is informed via their order view.
-- A factory may not accept an order after it has already been accepted or rejected.
+- A factory can view the requests it submitted and withdraw its own pending requests. After a withdrawal, it can submit a new request using an eligible offer.
+- Only the listing owner can accept or reject a request. A reserved listing stays unavailable for new requests until an eligible cancellation reopens it.
 
 ### 5.7 Confirming Actual Collected Weight
 
@@ -379,16 +378,13 @@ Farm size must **never** be used as a formula input to automatically predict or 
 The following statuses define the lifecycle of an order. Status transitions must be validated — unauthorized or skipped transitions must be rejected.
 
 ```
-REQUESTED → ACCEPTED → PICKUP_SCHEDULED → COLLECTED → COMPLETED
-REQUESTED → REJECTED
+ACCEPTED → PICKUP_SCHEDULED → COLLECTED → COMPLETED
 ACCEPTED  → CANCELLED  (farmer cancels before pickup)
 ```
 
 | Status | Description | Who Sets It |
 |---|---|---|
-| `REQUESTED` | Farmer has submitted an order request | System (on order creation) |
-| `ACCEPTED` | Factory has accepted the request | Factory |
-| `REJECTED` | Factory has declined the request | Factory |
+| `ACCEPTED` | The grower accepted an order request and an order was created | Grower |
 | `PICKUP_SCHEDULED` | Collection date and logistics confirmed | Factory |
 | `COLLECTED` | Leaves physically collected; actual weight entered | Factory |
 | `COMPLETED` | Order fully completed | Factory (after payment confirmed) |
@@ -412,7 +408,7 @@ PENDING → FAILED
 
 ### 9.3 Agreed Price Rule
 
-- When an order is created, the `agreedPricePerKg` from the price offer at that moment must be copied and stored directly on the order record.
+- When an order is created, copy the request's `quotedPricePerKg` to `agreedPricePerKg` and the listing's current estimate to `estimatedQuantityKg`. Preserve both snapshots.
 - This value must never be recalculated or overwritten after the order is placed.
 - If the factory later changes their price offer, existing orders are not affected.
 
@@ -420,7 +416,8 @@ PENDING → FAILED
 
 | Transition | Who Is Allowed |
 |---|---|
-| `REQUESTED` → `ACCEPTED` or `REJECTED` | Factory (owner of the offer) |
+| Pending request accepted or rejected | Grower (owner of the listing) |
+| Pending request withdrawn | Factory (owner of the offer) |
 | `ACCEPTED` → `PICKUP_SCHEDULED` | Factory (owner of the offer) |
 | `PICKUP_SCHEDULED` → `COLLECTED` | Factory |
 | `COLLECTED` → `COMPLETED` | Factory |
@@ -532,15 +529,16 @@ This is a high-level description of the main entities. Detailed schemas will be 
 | `Garden` | A farmer's tea garden profile | Belongs to one `User`; has many `Listing`s |
 | `Listing` | A harvest listing for available tea leaves | Belongs to one `Garden`; can have one accepted `Order` |
 | `Factory` | A factory's profile | Belongs to one `User`; has many `PriceOffer`s |
-| `PriceOffer` | A factory's buying price offer | Belongs to one `Factory`; can have many `Order`s |
-| `Order` | A procurement order | Links one `Listing` + one `PriceOffer`; has one `PaymentRecord` |
+| `PriceOffer` | A factory's buying price offer | Belongs to one `Factory`; can have many `OrderRequest`s |
+| `OrderRequest` | A factory's request with a fixed quoted price | Links one harvest listing and one offer; may produce one order |
+| `Order` | A confirmed procurement order | Belongs to one accepted request and listing; may have one future payment record |
 | `PaymentRecord` | Tracks payment status and amounts | Belongs to one `Order` |
 
 ### 13.2 Key Design Decisions
 
 1. **`User` stores the account** — role, email, hashed password. `Garden` and `Factory` are separate profile entities.
 2. **`agreedPricePerKg` is stored on `Order`** — copied at creation time and never recalculated.
-3. **`estimatedQuantityKg` is on `Listing`** — the farmer's estimate. `actualCollectedWeightKg` is on `Order` — the factory's confirmed weight.
+3. **`estimatedQuantityKg` starts on `Listing`** — the farmer's estimate is also copied onto `Order` at acceptance. `actualCollectedWeightKg` on `Order` records the factory's confirmed weight separately.
 4. **`orderStatus` and `paymentStatus` are on `Order`** — two separate enum fields, independently managed.
 5. **Soft delete** — `isActive` flag on `User` and `Listing` to preserve history.
 
@@ -558,7 +556,8 @@ This is a preliminary list of planned API endpoint groups. Exact routes will be 
 | Listings | `/listings` | `POST /`, `GET /`, `GET /:id`, `PATCH /:id`, `DELETE /:id` |
 | Factories | `/factories` | `POST /`, `GET /:id`, `PATCH /:id` |
 | Price Offers | `/offers` | `POST /`, `GET /`, `GET /:id`, `PATCH /:id`, `DELETE /:id` |
-| Orders | `/orders` | `POST /`, `GET /`, `GET /:id`, `PATCH /:id/status` |
+| Order requests | `/order-requests` | `POST /`, `GET /my`, `PATCH /:id/accept`, `PATCH /:id/reject`, `PATCH /:id/withdraw`, `GET /listings/:id/order-requests` |
+| Orders | `/orders` | `GET /my`, `GET /:id`, `PATCH /:id/status` |
 | Payments | `/payments` | `GET /:orderId`, `PATCH /:orderId/status` |
 | Admin | `/admin` | `GET /users`, `PATCH /users/:id/verify`, `PATCH /users/:id/deactivate` |
 
@@ -636,11 +635,11 @@ The following questions need explicit decisions before or during implementation.
 
 | # | Question | Impact |
 |---|---|---|
-| U1 | What happens to a listing when the order for it is rejected? Does the listing return to `ACTIVE` automatically, or must the farmer re-activate it? | Order + Listing status logic |
-| U2 | Can a farmer submit order requests to multiple factories for the same listing simultaneously, or only one at a time? | Order creation rules |
-| U3 | What happens to other pending order requests for a listing once one is accepted? Are they auto-rejected? | Order workflow |
+| U1 | Resolved. Rejecting a request leaves the listing available. An eligible pre-pickup order cancellation can reopen a reserved listing. | Order + Listing status logic |
+| U2 | Resolved. Multiple factories can submit requests for one listing, with one pending request per factory. | Request creation rules |
+| U3 | Resolved. Acceptance closes competing pending requests with `ANOTHER_REQUEST_ACCEPTED`. | Order workflow |
 | U4 | Should price offers be visible to unregistered (unauthenticated) users, or is login required to browse them? | Auth guard placement |
-| U5 | Is there a time limit for a factory to respond to an order request before it auto-expires? | Order expiry logic |
+| U5 | A separate request timeout is deferred. Offer and listing eligibility are rechecked when the grower accepts a request. | Request expiry logic |
 | U6 | Who sets the payment method — is it a free-text field entered by the factory, or a fixed enum? | Payment record design |
 | U7 | Should deactivated factory accounts have their active price offers automatically withdrawn? | Cascading status logic |
 | U8 | What is the exact list of tea grades / types? Is it a fixed enum or free text? | Listing and offer validation |

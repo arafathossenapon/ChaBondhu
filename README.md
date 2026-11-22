@@ -56,7 +56,6 @@ This repository contains the **backend REST API** developed with **NestJS**, **T
 
 ### Planned Features (Upcoming in Project Roadmap)
 
-- Procurement Orders & State Machine (`OrdersModule` — Step 11)
 - Payment Tracking Records (`PaymentsModule` — Step 12)
 - Platform Administrative Dashboard (`AdminModule` — Step 13)
 
@@ -226,6 +225,8 @@ Located in `src/database/migrations/`:
 2. `1793884438520-CreateHarvestListings.ts` — Creates `harvest_listings` table with check constraints (`estimated_quantity_kg > 0`) and indexes.
 3. `1795300000000-TrackFactoryVerificationReviews.ts` — Converts existing verification flags to statuses and adds decision history. Existing approvals keep their status and known approval details.
 4. `1795300100000-CreatePriceOffers.ts` — Creates `price_offers` with a factory profile foreign key and checks for numeric values and status.
+5. `1795390000000-CreateOrderRequestsAndOrders.ts` — Adds order requests, confirmed orders, and a unique reservation constraint.
+6. `1795390100000-AddOrderPickupFields.ts` — Adds pickup details and checks for scheduled and collected orders.
 
 ### Migration Commands
 
@@ -266,6 +267,8 @@ pnpm run test:e2e --runInBand
 ```
 
 The integration suite uses the PostgreSQL connection configured in `.env`. The database user needs permission to create a schema in that database. Fixtures and schema setup run in one transaction and are rolled back after the suite.
+
+The independent-connection race tests also need `CHABONDHU_ORDERS_TEST_URL` pointing to an empty, disposable local PostgreSQL database. They apply migrations and commit synthetic fixtures in that database so separate connections can race. The suite skips these cases when that variable is absent and refuses a database that already has tables in its public schema.
 
 টেস্টগুলো আলাদা স্কিমায় চলে। শেষে রোলব্যাক হয়, তাই আগের ডেটা ও মাইগ্রেশন ইতিহাস অক্ষত থাকে।
 
@@ -388,6 +391,21 @@ Use `teaGrade` for an exact, case-insensitive match and `minPrice` or `maxPrice`
 
 Edits may change `pricePerKg`, `minimumQuantityKg`, `validUntil`, and `notes`. An expired or withdrawn offer cannot be changed or reactivated. The app records expiry at startup and every minute using the Bangladesh date. Public reads hide expired offers as soon as the date passes. The owner list displays the stored status after the next successful sweep.
 
+#### 8. Order Requests and Orders
+
+| Method and endpoint | Role | Action |
+|---|---|---|
+| `POST /order-requests` | Verified FACTORY | Submit an owned offer against an available listing |
+| `GET /order-requests/my` | FACTORY | List own requests |
+| `GET /listings/:id/order-requests` | Owning GROWER | List incoming requests |
+| `PATCH /order-requests/:id/accept` or `/reject` | Owning GROWER | Decide a pending request |
+| `PATCH /order-requests/:id/withdraw` | Owning FACTORY | Withdraw a pending request |
+| `GET /orders/my` | GROWER or FACTORY | List orders involving the caller |
+| `GET /orders/:id` | Participant or ADMIN | Read the order and pickup details |
+| `PATCH /orders/:id/status` | Owning GROWER or FACTORY | Cancel before pickup, schedule pickup, or record collection according to role |
+
+These routes require a Bearer JWT. Acceptance creates the order at the submitted quote, reserves the listing, and closes competing pending requests in one transaction. Collection records actual weight while preserving the original estimate and payment status. See the [Orders API](docs/api-design.md#10-module-orders).
+
 ## 🔒 Authentication and Authorization
 
 ### Registration Flow
@@ -428,7 +446,7 @@ ChaBondhu uses role-based access control with three roles:
 | **Factory Profiles** | ✅ Complete | 1:1 factory profile linked to factories, admin verification audit |
 | **Harvest Listings** | ✅ Complete | Marketplace CRUD, filtering, pagination, lifecycle management |
 | **Price Offers** | ✅ Complete | Publishing, browsing, details, factory-owned listing, editing, withdrawal, and automatic expiry are available. |
-| **Procurement Orders** | ⏳ Planned | Order placement and state machine (`OrdersModule` — Step 11) |
+| **Procurement Orders** | ✅ Phase 7 | Requests, atomic acceptance, participant reads, cancellation, pickup, and collection are available. Completion awaits payment confirmation. |
 | **Payment Records** | ⏳ Planned | Procurement payment tracking (`PaymentsModule` — Step 12) |
 | **Admin** | 🔄 Partial | Factory verification and decision history are available. Broader dashboard and account moderation remain planned. |
 

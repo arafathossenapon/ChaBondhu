@@ -9,6 +9,7 @@ import { InjectRepository } from "@nestjs/typeorm";
 import { LessThan, Repository, SelectQueryBuilder } from "typeorm";
 import { AuthUser } from "@/common/interfaces/auth-user.interface";
 import { OfferStatus } from "@/common/enums/offer-status.enum";
+import { dateInBangladesh } from "@/common/utilities/bangladesh-date";
 import { FactoryVerificationService } from "@/modules/factory-profiles/factory-verification.service";
 import { FactoryProfilesService } from "@/modules/factory-profiles/factory-profiles.service";
 import { CreatePriceOfferDto } from "./dto/create-price-offer.dto";
@@ -16,13 +17,6 @@ import { UpdatePriceOfferDto } from "./dto/update-price-offer.dto";
 import { QueryPriceOffersDto } from "./dto/query-price-offers.dto";
 import { QueryOwnPriceOffersDto } from "./dto/query-own-price-offers.dto";
 import { PriceOffer } from "./entities/price-offer.entity";
-
-const bangladeshDate = new Intl.DateTimeFormat("en-CA", {
-  timeZone: "Asia/Dhaka",
-  year: "numeric",
-  month: "2-digit",
-  day: "2-digit",
-});
 
 @Injectable()
 export class OffersService {
@@ -97,7 +91,7 @@ export class OffersService {
       .addSelect(["factory.id", "factory.factoryName", "factory.district"])
       .where("offer.status = :status", { status: OfferStatus.ACTIVE })
       .andWhere("offer.validUntil >= :today", {
-        today: bangladeshDate.format(new Date()),
+        today: dateInBangladesh(),
       });
   }
 
@@ -154,7 +148,7 @@ export class OffersService {
   ): Promise<PriceOffer> {
     const factory = await this.verification.requireVerifiedFactory(actor);
     // অফারের তারিখ বাংলাদেশের স্থানীয় দিন অনুযায়ী যাচাই হয়।
-    if (dto.validUntil <= bangladeshDate.format(new Date())) {
+    if (dto.validUntil <= dateInBangladesh()) {
       throw new BadRequestException(
         "validUntil must be after today in Bangladesh",
       );
@@ -195,7 +189,7 @@ export class OffersService {
     const result = await this.offers.update(
       {
         status: OfferStatus.ACTIVE,
-        validUntil: LessThan(bangladeshDate.format(now)),
+        validUntil: LessThan(dateInBangladesh(now)),
       },
       { status: OfferStatus.EXPIRED },
     );
@@ -221,7 +215,7 @@ export class OffersService {
       if (offer.factoryProfileId !== factoryProfileId) {
         throw new ForbiddenException("You do not own this offer");
       }
-      const today = bangladeshDate.format(new Date());
+      const today = dateInBangladesh();
       if (offer.status !== OfferStatus.ACTIVE || offer.validUntil < today) {
         throw new ConflictException(
           "Only active, unexpired offers can be changed",
