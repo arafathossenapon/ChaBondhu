@@ -17,8 +17,8 @@
 5. [Entity: HarvestListing](#5-entity-harvestlisting)
 6. [Entity: PriceOffer](#6-entity-priceoffer)
 7. [Entity: Order](#7-entity-order)
-8. [Entity: PickupBatch](#8-entity-pickupbatch)
-9. [Entity: Payment](#9-entity-payment)
+8. [Entity: PickupBatch (planned)](#8-entity-pickupbatch-planned)
+9. [Entities: Payment and PaymentAttempt](#9-entities-payment-and-paymentattempt)
 10. [Entity Relationship Summary](#10-entity-relationship-summary)
 11. [ER Diagram](#11-er-diagram)
 12. [Index Strategy](#12-index-strategy)
@@ -69,7 +69,7 @@
 | `id` | `number` | `SERIAL` PK | No | auto | Primary key |
 | `fullName` | `string` | `VARCHAR(150)` | No | — | User's full name |
 | `email` | `string` | `VARCHAR(255)` | No | — | Unique login identifier |
-| `passwordHash` | `string` | `VARCHAR(255)` | No | — | bcrypt-hashed password; never plain text |
+| `passwordHash` | `string` | `VARCHAR(255)` | No | — | Argon2-hashed password; never plain text |
 | `phoneNumber` | `string` | `VARCHAR(20)` | No | — | Contact number |
 | `role` | `UserRole` | `VARCHAR(20)` | No | — | Enum: `GROWER`, `FACTORY`, `ADMIN` |
 | `isActive` | `boolean` | `BOOLEAN` | No | `true` | Soft-delete / deactivation flag |
@@ -394,7 +394,7 @@ A partial unique index on `(harvest_listing_id, price_offer_id)` covers pending 
 | `orderRequestId`, `harvestListingId` | Required composite FK to the request and its listing. `orderRequestId` is unique. |
 | `agreedPricePerKg` | Positive `NUMERIC(12,2)`. Immutable copy of the submitted quote. |
 | `estimatedQuantityKg` | Positive `NUMERIC(10,3)`. Immutable copy of the listing estimate at acceptance. |
-| `actualCollectedWeightKg` | Nullable `NUMERIC(10,3)`. Required for collected and completed orders, with a minimum of zero. |
+| `actualCollectedWeightKg` | Nullable `NUMERIC(10,3)`. Required for collected and completed orders. The database constraint permits zero for legacy records. The collection API requires a positive weight, and payment requires at least BDT 0.01 after rounding. |
 | `orderStatus` | `ACCEPTED`, `PICKUP_SCHEDULED`, `COLLECTED`, `COMPLETED`, or `CANCELLED`. Default is `ACCEPTED`. |
 | `paymentStatus` | `PENDING`, `SUBMITTED`, `CONFIRMED`, or `REJECTED`. Default is `PENDING`. |
 | `proposedCollectionDate`, `collectionPoint` | `DATE` and `VARCHAR(255)`. Required from pickup scheduling onward. |
@@ -418,7 +418,9 @@ Pickup and collection preserve `paymentStatus`. The grower records receipt confi
 
 ---
 
-## 8. Entity: PickupBatch
+## 8. Entity: PickupBatch (planned)
+
+The following design is for future batch coordination. The current TypeORM entities and migrations store pickup directly on orders through proposed_collection_date, collection_point, pickup_notes, and estimated_transport_cost_bdt. Collection records actual_collected_weight_kg separately from the estimated quantity. See §7.2 for column types and nullability.
 
 **Table name:** `pickup_batch`  
 **Purpose:** Future design for grouping several orders into a single factory pickup trip. Phase 7 stores pickup fields directly on each order.
@@ -599,17 +601,6 @@ erDiagram
         datetime updatedAt
     }
 
-    PickupBatch {
-        int id PK
-        int factoryProfileId FK
-        date scheduledDate
-        text collectionRoute
-        text notes
-        string status
-        datetime createdAt
-        datetime updatedAt
-    }
-
     Payment {
         int id PK
         int orderId FK
@@ -638,8 +629,6 @@ erDiagram
     OrderRequest ||--o| Order : "creates"
     Order ||--o| Payment : "has one"
     Payment ||--o{ PaymentAttempt : "records attempt"
-    FactoryProfile ||--o{ PickupBatch : "has many"
-    PickupBatch ||--o{ Order : "groups"
     User ||--o{ FactoryProfile : "verified by admin"
 ```
 
@@ -677,8 +666,6 @@ erDiagram
 | `payments` | `id` | PK | — |
 | `payments` | `orderId` | UNIQUE | One payment per order |
 | `payment_attempts` | Payment and decision | Partial unique | One active and one confirmed attempt per settlement |
-| `pickup_batch` | `id` | PK | — |
-| `pickup_batch` | `factoryProfileId` | INDEX | Factory's batches |
 
 ---
 
