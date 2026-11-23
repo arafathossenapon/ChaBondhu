@@ -396,7 +396,7 @@ A partial unique index on `(harvest_listing_id, price_offer_id)` covers pending 
 | `estimatedQuantityKg` | Positive `NUMERIC(10,3)`. Immutable copy of the listing estimate at acceptance. |
 | `actualCollectedWeightKg` | Nullable `NUMERIC(10,3)`. Required for collected and completed orders, with a minimum of zero. |
 | `orderStatus` | `ACCEPTED`, `PICKUP_SCHEDULED`, `COLLECTED`, `COMPLETED`, or `CANCELLED`. Default is `ACCEPTED`. |
-| `paymentStatus` | `PENDING`, `PROCESSING`, `COMPLETED`, or `FAILED`. Default is `PENDING`. |
+| `paymentStatus` | `PENDING`, `SUBMITTED`, `CONFIRMED`, or `REJECTED`. Default is `PENDING`. |
 | `proposedCollectionDate`, `collectionPoint` | `DATE` and `VARCHAR(255)`. Required from pickup scheduling onward. |
 | `pickupNotes`, `estimatedTransportCostBdt` | Optional `TEXT` and non-negative `NUMERIC(12,2)`. |
 | `createdAt`, `updatedAt` | `TIMESTAMPTZ` |
@@ -412,9 +412,9 @@ The grower's acceptance locks the listing first, rechecks eligibility, creates t
 | `ACCEPTED` | `CANCELLED` | Grower who owns the listing, before pickup is scheduled |
 | `ACCEPTED` | `PICKUP_SCHEDULED` | Owning factory, with pickup date and point |
 | `PICKUP_SCHEDULED` | `COLLECTED` | Owning factory, with actual weight |
-| `COLLECTED` | `COMPLETED` | Future action by the owning factory after confirmed payment. Completion marks the listing `SOLD`. |
+| `COLLECTED` | `COMPLETED` | Action by the owning factory after confirmed payment. Completion marks the listing `SOLD`. |
 
-Pickup and collection preserve `paymentStatus`. The later Payments workflow will record payment confirmation independently.
+Pickup and collection preserve `paymentStatus`. The grower records receipt confirmation independently through PaymentsModule.
 
 ---
 
@@ -468,59 +468,13 @@ Pickup uses the fields on `Order`. A future migration can add `pickup_batches` a
 
 ---
 
-## 9. Entity: Payment
+## 9. Entities: Payment and PaymentAttempt
 
-**Table name:** `payment`  
-**Purpose:** Stores the final payment record for a completed or in-progress order. Created when the factory enters the actual collected weight.
-
-### 9.1 Columns
-
-| Column | TypeScript Type | PostgreSQL Type | Nullable | Default | Description |
-|---|---|---|---|---|---|
-| `id` | `number` | `SERIAL` PK | No | auto | Primary key |
-| `orderId` | `number` | `INTEGER` FK | No | — | References `orders.id`, unique for one payment per order |
-| `agreedPricePerKg` | `number` | `NUMERIC(12, 2)` | No | — | Copied from `order.agreedPricePerKg`; for display and audit |
-| `actualCollectedWeightKg` | `number` | `NUMERIC(10, 3)` | No | — | Copied from `order.actualCollectedWeightKg` at payment record creation |
-| `totalAmountBdt` | `number` | `NUMERIC(12, 2)` | No | — | Calculated: `agreedPricePerKg × actualCollectedWeightKg` |
-| `paymentStatus` | `PaymentStatus` | `VARCHAR(20)` | No | `'PENDING'` | Mirrors `order.paymentStatus`; kept in sync |
-| `paymentMethod` | `string` | `VARCHAR(100)` | Yes | `NULL` | Free-text e.g. "Bank Transfer", "Cash" |
-| `paymentDate` | `Date` | `DATE` | Yes | `NULL` | Set when status becomes `COMPLETED` |
-| `notes` | `string` | `TEXT` | Yes | `NULL` | Optional payment notes |
-| `createdAt` | `Date` | `TIMESTAMPTZ` | No | `now()` | — |
-| `updatedAt` | `Date` | `TIMESTAMPTZ` | No | `now()` | — |
-
-### 9.2 Constraints
-
-| Constraint | Column | Rule |
-|---|---|---|
-| PRIMARY KEY | `id` | — |
-| UNIQUE | `orderId` | One payment record per order |
-| FOREIGN KEY | `orderId` → `orders.id` | Must reference a valid order |
-| NOT NULL | `orderId`, `agreedPricePerKg`, `actualCollectedWeightKg`, `totalAmountBdt`, `paymentStatus` | Required |
-| CHECK | `agreedPricePerKg > 0` | Price must be positive |
-| CHECK | `actualCollectedWeightKg >= 0` | Weight must be non-negative |
-| CHECK | `totalAmountBdt >= 0` | Total cannot be negative |
-
-### 9.3 Relationships
-
-| Relationship | With Entity | Cardinality | FK Location |
-|---|---|---|---|
-| Belongs to | `Order` | 1 : 1 | `payment.orderId` |
-
-### 9.4 Indexes
-
-| Index | Column | Reason |
-|---|---|---|
-| PRIMARY | `id` | — |
-| UNIQUE | `orderId` | Enforce one-payment-per-order |
-| INDEX | `paymentStatus` | Filter by payment status |
-
-### 9.5 Business Notes
-
-- A `Payment` record is created by the service when the factory confirms `actualCollectedWeightKg` (order moves to `COLLECTED`).
-- `totalAmountBdt` is calculated at record creation: `agreedPricePerKg × actualCollectedWeightKg`. It uses fixed-precision arithmetic.
-- `agreedPricePerKg` is redundantly stored here (also on `Order`) for auditability and to make payment receipts self-contained.
-- No real money is transferred. This is a tracking record only.
+- `payments` has a generated ID, unique `order_id` foreign key, `amount_bdt NUMERIC(19,2) CHECK (amount_bdt >= 0.01)`, and creation timestamp. The first valid submission creates the settlement and snapshots the PostgreSQL calculation.
+- `payment_attempts` references the settlement, submitting user, and optional deciding user through restrictive foreign keys. It stores the method, normalized provider and reference, payment date, creation timestamp, and idempotency key. A grower decision records the decision, actor, time, and mandatory reason when rejected.
+- A unique key per settlement enforces idempotency. Partial unique indexes allow one undecided attempt and one confirmed attempt per settlement. Noncash references remain unique by method and provider across all attempts, including rejected attempts.
+- `orders.payment_status` is the current authoritative status. The attempt decision records historical receipt outcomes.
+- Migration `CreatePayments1795390200000` preserves existing `PENDING` rows and aborts on legacy payment states. Rollback refuses to delete recorded settlement history.
 
 ---
 
@@ -659,15 +613,20 @@ erDiagram
     Payment {
         int id PK
         int orderId FK
-        decimal agreedPricePerKg
-        decimal actualCollectedWeightKg
-        decimal totalAmountBdt
-        string paymentStatus
-        string paymentMethod
-        date paymentDate
-        text notes
+        decimal amountBdt
         datetime createdAt
-        datetime updatedAt
+    }
+
+    PaymentAttempt {
+        int id PK
+        int paymentId FK
+        int submittedBy FK
+        int decidedBy FK
+        string method
+        string provider
+        string reference
+        date paymentDate
+        string decision
     }
 
     User ||--o| FarmerProfile : "has one"
@@ -678,6 +637,7 @@ erDiagram
     PriceOffer ||--o{ OrderRequest : "supplies the quote"
     OrderRequest ||--o| Order : "creates"
     Order ||--o| Payment : "has one"
+    Payment ||--o{ PaymentAttempt : "records attempt"
     FactoryProfile ||--o{ PickupBatch : "has many"
     PickupBatch ||--o{ Order : "groups"
     User ||--o{ FactoryProfile : "verified by admin"
@@ -714,9 +674,9 @@ erDiagram
 | `order_requests` | `harvestListingId, priceOfferId` | PARTIAL UNIQUE | One pending request for each listing and offer pair |
 | `orders` | `orderRequestId` | UNIQUE | One order per accepted request |
 | `orders` | `harvestListingId` | INDEX and PARTIAL UNIQUE | Order history and one reservation or completed sale |
-| `payment` | `id` | PK | — |
-| `payment` | `orderId` | UNIQUE | One payment per order |
-| `payment` | `paymentStatus` | INDEX | Filter by payment status |
+| `payments` | `id` | PK | — |
+| `payments` | `orderId` | UNIQUE | One payment per order |
+| `payment_attempts` | Payment and decision | Partial unique | One active and one confirmed attempt per settlement |
 | `pickup_batch` | `id` | PK | — |
 | `pickup_batch` | `factoryProfileId` | INDEX | Factory's batches |
 
@@ -732,7 +692,7 @@ erDiagram
 | Only the grower who owns the listing can accept or reject a request | Service layer | Resolve ownership through the listing's farmer profile inside the transaction |
 | One reserved or sold order per listing | Database | Partial unique index on the listing for active and completed orders |
 | Valid order status transitions only | Service layer | Transition table checked in `OrdersService.updateStatus()` |
-| Valid payment status transitions only | Service layer | Transition table checked in `OrdersService.updatePaymentStatus()` |
+| Valid payment status transitions only | Service layer | Transitions checked in `PaymentsService` |
 | One farmer profile per user | Database | UNIQUE constraint on `farmer_profile.userId` |
 | One factory profile per user | Database | UNIQUE constraint on `factory_profile.userId` |
 | One payment record per order | Database | UNIQUE constraint on `payment.orderId` |
