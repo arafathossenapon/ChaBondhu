@@ -18,6 +18,7 @@ const allowedActions = [
   OrderStatus.CANCELLED,
   OrderStatus.PICKUP_SCHEDULED,
   OrderStatus.COLLECTED,
+  OrderStatus.COMPLETED,
 ] as const;
 type OrderAction = (typeof allowedActions)[number];
 
@@ -71,7 +72,7 @@ export class UpdateOrderStatusDto {
 
   @ApiPropertyOptional({
     description: "Actual kg, required for COLLECTED",
-    minimum: 0,
+    minimum: 0.001,
     example: 142.75,
   })
   @ValidateIf(
@@ -79,7 +80,7 @@ export class UpdateOrderStatusDto {
       dto.orderStatus === OrderStatus.COLLECTED || value !== undefined,
   )
   @IsDecimalNumber(3)
-  @Min(0)
+  @Min(0.001)
   @Max(9999999.999)
   actualCollectedWeightKg?: number;
 }

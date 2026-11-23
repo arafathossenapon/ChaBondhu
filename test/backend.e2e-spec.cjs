@@ -1780,7 +1780,7 @@ describe("ChaBondhu backend", () => {
         .patch(path)
         .auth(buyerOne.token, bearer)
         .send({ orderStatus: "COMPLETED" })
-        .expect(400);
+        .expect(409);
       expect(
         await runner.manager.findOneByOrFail(HarvestListing, { id: batch.id }),
       ).toMatchObject({
@@ -1790,7 +1790,8 @@ describe("ChaBondhu backend", () => {
     });
 
     it("records private settlements and immutable attempts with idempotent submissions and decisions", async () => {
-      const order = await acceptOrder(await createListing());
+      const batch = await createListing();
+      const order = await acceptOrder(batch);
       const status = `/orders/${order.id}/status`;
       await api
         .patch(status)
@@ -1912,6 +1913,22 @@ describe("ChaBondhu backend", () => {
         orderStatus: "COLLECTED",
         paymentStatus: "CONFIRMED",
       });
+      const complete = (token) =>
+        api
+          .patch(status)
+          .auth(token, bearer)
+          .send({ orderStatus: "COMPLETED" });
+      await complete(growerToken).expect(403);
+      await complete(buyerTwo.token).expect(404);
+      const completed = await complete(buyerOne.token).expect(200);
+      expect(completed.body).toMatchObject({
+        orderStatus: "COMPLETED",
+        paymentStatus: "CONFIRMED",
+      });
+      expect(
+        await runner.manager.findOneByOrFail(HarvestListing, { id: batch.id }),
+      ).toMatchObject({ status: "SOLD" });
+      await complete(buyerOne.token).expect(409);
     });
     it("rejects invalid pickup details, collection weight, and attempts to alter order snapshots", async () => {
       const order = await acceptOrder(await createListing());
@@ -1946,6 +1963,7 @@ describe("ChaBondhu backend", () => {
         },
         { orderStatus: "COLLECTED" },
         { orderStatus: "COLLECTED", actualCollectedWeightKg: -1 },
+        { orderStatus: "COLLECTED", actualCollectedWeightKg: 0 },
         { orderStatus: "COLLECTED", actualCollectedWeightKg: 142.7501 },
         { orderStatus: "COLLECTED", actualCollectedWeightKg: "142.75" },
         {
