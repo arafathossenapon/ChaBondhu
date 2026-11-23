@@ -1,4 +1,6 @@
-const { CreatePayments1795390200000 } = require("../dist/database/migrations/1795390200000-CreatePayments");
+const {
+  CreatePayments1795390200000,
+} = require("../dist/database/migrations/1795390200000-CreatePayments");
 const { randomUUID } = require("node:crypto");
 const { Test } = require("@nestjs/testing");
 const { getRepositoryToken } = require("@nestjs/typeorm");
@@ -1787,6 +1789,130 @@ describe("ChaBondhu backend", () => {
       });
     });
 
+    it("records private settlements and immutable attempts with idempotent submissions and decisions", async () => {
+      const order = await acceptOrder(await createListing());
+      const status = `/orders/${order.id}/status`;
+      await api
+        .patch(status)
+        .auth(buyerOne.token, bearer)
+        .send({
+          orderStatus: "PICKUP_SCHEDULED",
+          proposedCollectionDate: "2099-12-18",
+          collectionPoint: "Tetulia",
+        })
+        .expect(200);
+      await api
+        .patch(status)
+        .auth(buyerOne.token, bearer)
+        .send({
+          orderStatus: "COLLECTED",
+          actualCollectedWeightKg: 142.75,
+        })
+        .expect(200);
+      const path = `/payments/order/${order.id}`;
+      const payload = {
+        method: "MOBILE_FINANCIAL_SERVICE",
+        provider: " bkash ",
+        reference: " alpha-123 ",
+        paymentDate: "2026-11-23",
+      };
+      const submit = (key, body, token = buyerOne.token) =>
+        api
+          .post(path + "/attempts")
+          .auth(token, bearer)
+          .set("Idempotency-Key", key)
+          .send(body);
+      await submit("first", payload, buyerTwo.token).expect(404);
+      await submit("first", payload, adminToken).expect(403);
+      await submit("first", { ...payload, amountBdt: 1 }).expect(400);
+      const first = (await submit("first", payload).expect(201)).body;
+      const decision = `${path}/attempts/${first.attempt.id}`;
+      expect(first.attempt).toMatchObject({
+        provider: "BKASH",
+        reference: "ALPHA-123",
+        decision: null,
+      });
+      await submit("first", { ...payload, reference: "OTHER" }).expect(409);
+      await api
+        .patch(decision + "/confirm")
+        .auth(otherGrowerToken, bearer)
+        .send({})
+        .expect(404);
+      await api
+        .patch(decision + "/reject")
+        .auth(growerToken, bearer)
+        .send({ rejectionReason: " " })
+        .expect(400);
+      await api
+        .patch(decision + "/reject")
+        .auth(growerToken, bearer)
+        .send({ rejectionReason: "Receipt missing" })
+        .expect(200);
+      expect(
+        (
+          await submit("first", { ...payload, reference: "ALPHA-123" }).expect(
+            201,
+          )
+        ).body,
+      ).toEqual(first);
+      await submit("second", payload).expect(409);
+      const second = (
+        await submit("second", { ...payload, reference: "NEW-456" }).expect(201)
+      ).body;
+      const confirm = `${path}/attempts/${second.attempt.id}/confirm`;
+      const accepted = (
+        await api.patch(confirm).auth(growerToken, bearer).send({}).expect(200)
+      ).body;
+      expect(
+        (
+          await api
+            .patch(confirm)
+            .auth(growerToken, bearer)
+            .send({})
+            .expect(200)
+        ).body,
+      ).toEqual(accepted);
+      await api.patch(confirm).auth(adminToken, bearer).send({}).expect(403);
+      await submit("third", { ...payload, reference: "NEW-789" }).expect(409);
+      await api.get(path).auth(otherGrowerToken, bearer).expect(404);
+      expect(
+        (await api.get(path).auth(growerToken, bearer).expect(200)).body,
+      ).toMatchObject({ paymentStatus: "CONFIRMED" });
+      const history = (
+        await api
+          .get(path + "/history")
+          .auth(buyerOne.token, bearer)
+          .expect(200)
+      ).body.data;
+      expect(history).toMatchObject([
+        { decision: "CONFIRMED" },
+        { decision: "REJECTED", rejectionReason: "Receipt missing" },
+      ]);
+      expect(history[0]).not.toHaveProperty("idempotencyKey");
+      expect(
+        (await api.get("/payments/my").auth(buyerOne.token, bearer).expect(200))
+          .body.total,
+      ).toBe(1);
+      expect(
+        (await api.get("/payments/my").auth(buyerTwo.token, bearer).expect(200))
+          .body.total,
+      ).toBe(0);
+      expect(
+        (await api.get("/admin/payments").auth(adminToken, bearer).expect(200))
+          .body.total,
+      ).toBe(1);
+      expect(
+        (
+          await api
+            .get(`/orders/${order.id}`)
+            .auth(growerToken, bearer)
+            .expect(200)
+        ).body,
+      ).toMatchObject({
+        orderStatus: "COLLECTED",
+        paymentStatus: "CONFIRMED",
+      });
+    });
     it("rejects invalid pickup details, collection weight, and attempts to alter order snapshots", async () => {
       const order = await acceptOrder(await createListing());
       const edit = (dto) =>
