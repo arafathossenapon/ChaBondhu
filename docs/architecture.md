@@ -39,7 +39,7 @@ ChaBondhu's backend is a **modular RESTful API** built with NestJS and TypeScrip
 | ORM | TypeORM | Course requirement; integrates cleanly with NestJS |
 | Auth | JWT + Passport | Course requirement; stateless, standard for REST APIs |
 | Validation | `class-validator` + `ValidationPipe` | Course requirement; declarative, integrated with NestJS |
-| Password hashing | bcrypt | Industry standard for password security |
+| Password hashing | Argon2 | Memory-hard password hashing |
 | API documentation | Swagger (via `@nestjs/swagger`) | Built-in; useful for Postman testing and grading |
 
 ### 1.2 What the Backend Is Responsible For
@@ -306,7 +306,7 @@ sequenceDiagram
     US->>DB: SELECT * FROM user WHERE email = ?
     DB-->>US: User row
     US-->>AS: User entity
-    AS->>AS: bcrypt.compare(password, user.passwordHash)
+    AS->>AS: argon2.verify(user.passwordHash, password)
     AS->>AS: jwt.sign({ sub: user.id, email, role })
     AS-->>AC: { accessToken, user }
     AC-->>C: 200 OK { accessToken, user }
@@ -462,12 +462,12 @@ The global TypeORM connection is configured in `AppModule` using `TypeOrmModule.
 ```
 DB_HOST=localhost
 DB_PORT=5432
-DB_USERNAME=chabondhu_user
+DB_USER=chabondhu_user
 DB_PASSWORD=your_password_here
-DB_NAME=chabondhu_db
+DB_DATABASE=chabondhu_db
 ```
 
-> **`synchronize: true`** is used only during development to auto-update the schema. Before final submission, this will be switched to `false` and migrations will be used instead.
+> TypeORM uses **synchronize: false** in development and production. Version-controlled migrations apply schema changes.
 
 ---
 
@@ -485,10 +485,10 @@ All business logic lives in **service classes**. Controllers never contain condi
 | Check offer belongs to requesting factory | `OffersService` | `update()`, `withdraw()` |
 | Check factory is verified before creating offer | `OffersService` | `create()` |
 | Prevent cancellation of listing with active orders | `ListingsService` | `cancel()` |
-| Auto-mark listing as `SOLD` when order completes | `OrdersService` | `completeOrder()` |
-| Calculate `totalAmountBdt` using decimal precision | `PaymentsService` | `createPaymentRecord()` |
-| Check listing is `ACTIVE` before allowing order | `OrdersService` | `createOrder()` |
-| Check offer is `ACTIVE` and not expired before allowing order | `OrdersService` | `createOrder()` |
+| Auto-mark listing as `SOLD` when order completes | `OrdersService` | `updateStatus()` |
+| Calculate the payable amount using PostgreSQL NUMERIC | Payments amount helper | requirePayableAmount() |
+| Check listing is `ACTIVE` before allowing order | OrderRequestsService | submit(), accept() |
+| Check offer is `ACTIVE` and not expired before allowing order | OrderRequestsService | submit(), accept() |
 | Prevent deactivated users from logging in | `AuthService` | `validateUser()` |
 
 ### 9.1 Order Status Transition Table (Enforced in Service)
@@ -536,16 +536,13 @@ PORT=3000
 # Database (PostgreSQL)
 DB_HOST=localhost
 DB_PORT=5432
-DB_USERNAME=chabondhu_user
+DB_USER=chabondhu_user
 DB_PASSWORD=your_secure_password_here
-DB_NAME=chabondhu_db
+DB_DATABASE=chabondhu_db
 
 # JWT
 JWT_SECRET=your_jwt_secret_key_here_make_it_long_and_random
 JWT_EXPIRES_IN=7d
-
-# bcrypt
-BCRYPT_SALT_ROUNDS=10
 ```
 
 ### 10.2 Accessing Config in NestJS
