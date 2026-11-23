@@ -1,3 +1,6 @@
+const {
+  CreatePayments1795390200000,
+} = require("../dist/database/migrations/1795390200000-CreatePayments");
 const { randomUUID } = require("node:crypto");
 const { Test } = require("@nestjs/testing");
 const { getRepositoryToken } = require("@nestjs/typeorm");
@@ -145,6 +148,7 @@ describe("ChaBondhu backend", () => {
     await new CreatePriceOffers1795300100000().up(runner);
     await new CreateOrderRequestsAndOrders1795390000000().up(runner);
     await new AddOrderPickupFields1795390100000().up(runner);
+    await new CreatePayments1795390200000().up(runner);
     const legacyProfile = await runner.manager.findOneByOrFail(FactoryProfile, {
       userId: legacyFactory.id,
     });
@@ -1737,6 +1741,36 @@ describe("ChaBondhu backend", () => {
         collectionPoint: "Tetulia collection point",
         proposedCollectionDate: pickup.proposedCollectionDate,
       });
+      const amountPath = `/payments/order/${order.id}/amount`;
+      await api.get(amountPath).expect(401);
+      await api.get(amountPath).auth(buyerTwo.token, bearer).expect(404);
+      await api.get(amountPath).auth(otherGrowerToken, bearer).expect(404);
+      // Exercise exact half-cent rounding and zero-payable legacy orders.
+      await runner.query(
+        "UPDATE orders SET agreed_price_per_kg = 1, actual_collected_weight_kg = 1.005 WHERE id = $1",
+        [order.id],
+      );
+      for (const token of [buyerOne.token, growerToken, adminToken]) {
+        const response = await api
+          .get(amountPath)
+          .auth(token, bearer)
+          .expect(200);
+        expect(response.body).toEqual({
+          orderId: order.id,
+          amountBdt: "1.01",
+          currency: "BDT",
+          paymentStatus: "PENDING",
+        });
+      }
+      await runner.query(
+        "UPDATE orders SET actual_collected_weight_kg = 0.001 WHERE id = $1",
+        [order.id],
+      );
+      await api.get(amountPath).auth(buyerOne.token, bearer).expect(409);
+      await runner.query(
+        "UPDATE orders SET agreed_price_per_kg = $2, actual_collected_weight_kg = 142.75 WHERE id = $1",
+        [order.id, order.agreedPricePerKg],
+      );
       const growerRead = await api
         .get(`/orders/${order.id}`)
         .auth(growerToken, bearer)
@@ -1746,7 +1780,7 @@ describe("ChaBondhu backend", () => {
         .patch(path)
         .auth(buyerOne.token, bearer)
         .send({ orderStatus: "COMPLETED" })
-        .expect(400);
+        .expect(409);
       expect(
         await runner.manager.findOneByOrFail(HarvestListing, { id: batch.id }),
       ).toMatchObject({
@@ -1755,6 +1789,147 @@ describe("ChaBondhu backend", () => {
       });
     });
 
+    it("records private settlements and immutable attempts with idempotent submissions and decisions", async () => {
+      const batch = await createListing();
+      const order = await acceptOrder(batch);
+      const status = `/orders/${order.id}/status`;
+      await api
+        .patch(status)
+        .auth(buyerOne.token, bearer)
+        .send({
+          orderStatus: "PICKUP_SCHEDULED",
+          proposedCollectionDate: "2099-12-18",
+          collectionPoint: "Tetulia",
+        })
+        .expect(200);
+      await api
+        .patch(status)
+        .auth(buyerOne.token, bearer)
+        .send({
+          orderStatus: "COLLECTED",
+          actualCollectedWeightKg: 142.75,
+        })
+        .expect(200);
+      const path = `/payments/order/${order.id}`;
+      const payload = {
+        method: "MOBILE_FINANCIAL_SERVICE",
+        provider: " bkash ",
+        reference: " alpha-123 ",
+        paymentDate: "2026-11-23",
+      };
+      const submit = (key, body, token = buyerOne.token) =>
+        api
+          .post(path + "/attempts")
+          .auth(token, bearer)
+          .set("Idempotency-Key", key)
+          .send(body);
+      await submit("first", payload, buyerTwo.token).expect(404);
+      await submit("first", payload, adminToken).expect(403);
+      await submit("first", { ...payload, amountBdt: 1 }).expect(400);
+      const first = (await submit("first", payload).expect(201)).body;
+      const decision = `${path}/attempts/${first.attempt.id}`;
+      expect(first.attempt).toMatchObject({
+        provider: "BKASH",
+        reference: "ALPHA-123",
+        decision: null,
+      });
+      await submit("first", { ...payload, reference: "OTHER" }).expect(409);
+      await api
+        .patch(decision + "/confirm")
+        .auth(otherGrowerToken, bearer)
+        .send({})
+        .expect(404);
+      await api
+        .patch(decision + "/reject")
+        .auth(growerToken, bearer)
+        .send({ rejectionReason: " " })
+        .expect(400);
+      await api
+        .patch(decision + "/reject")
+        .auth(growerToken, bearer)
+        .send({ rejectionReason: "Receipt missing" })
+        .expect(200);
+      expect(
+        (
+          await submit("first", { ...payload, reference: "ALPHA-123" }).expect(
+            201,
+          )
+        ).body,
+      ).toEqual(first);
+      await submit("second", payload).expect(409);
+      const second = (
+        await submit("second", { ...payload, reference: "NEW-456" }).expect(201)
+      ).body;
+      const confirm = `${path}/attempts/${second.attempt.id}/confirm`;
+      const accepted = (
+        await api.patch(confirm).auth(growerToken, bearer).send({}).expect(200)
+      ).body;
+      expect(
+        (
+          await api
+            .patch(confirm)
+            .auth(growerToken, bearer)
+            .send({})
+            .expect(200)
+        ).body,
+      ).toEqual(accepted);
+      await api.patch(confirm).auth(adminToken, bearer).send({}).expect(403);
+      await submit("third", { ...payload, reference: "NEW-789" }).expect(409);
+      await api.get(path).auth(otherGrowerToken, bearer).expect(404);
+      expect(
+        (await api.get(path).auth(growerToken, bearer).expect(200)).body,
+      ).toMatchObject({ paymentStatus: "CONFIRMED" });
+      const history = (
+        await api
+          .get(path + "/history")
+          .auth(buyerOne.token, bearer)
+          .expect(200)
+      ).body.data;
+      expect(history).toMatchObject([
+        { decision: "CONFIRMED" },
+        { decision: "REJECTED", rejectionReason: "Receipt missing" },
+      ]);
+      expect(history[0]).not.toHaveProperty("idempotencyKey");
+      expect(
+        (await api.get("/payments/my").auth(buyerOne.token, bearer).expect(200))
+          .body.total,
+      ).toBe(1);
+      expect(
+        (await api.get("/payments/my").auth(buyerTwo.token, bearer).expect(200))
+          .body.total,
+      ).toBe(0);
+      expect(
+        (await api.get("/admin/payments").auth(adminToken, bearer).expect(200))
+          .body.total,
+      ).toBe(1);
+      expect(
+        (
+          await api
+            .get(`/orders/${order.id}`)
+            .auth(growerToken, bearer)
+            .expect(200)
+        ).body,
+      ).toMatchObject({
+        orderStatus: "COLLECTED",
+        paymentStatus: "CONFIRMED",
+      });
+      const complete = (token) =>
+        api
+          .patch(status)
+          .auth(token, bearer)
+          .send({ orderStatus: "COMPLETED" });
+      await complete(growerToken).expect(403);
+      await complete(buyerTwo.token).expect(404);
+      const completed = await complete(buyerOne.token).expect(200);
+      expect(completed.body).toMatchObject({
+        orderStatus: "COMPLETED",
+        paymentStatus: "CONFIRMED",
+      });
+      expect(
+        await runner.manager.findOneByOrFail(HarvestListing, { id: batch.id }),
+      ).toMatchObject({ status: "SOLD" });
+      await complete(buyerOne.token).expect(409);
+    });
     it("rejects invalid pickup details, collection weight, and attempts to alter order snapshots", async () => {
       const order = await acceptOrder(await createListing());
       const edit = (dto) =>
@@ -1788,6 +1963,7 @@ describe("ChaBondhu backend", () => {
         },
         { orderStatus: "COLLECTED" },
         { orderStatus: "COLLECTED", actualCollectedWeightKg: -1 },
+        { orderStatus: "COLLECTED", actualCollectedWeightKg: 0 },
         { orderStatus: "COLLECTED", actualCollectedWeightKg: 142.7501 },
         { orderStatus: "COLLECTED", actualCollectedWeightKg: "142.75" },
         {

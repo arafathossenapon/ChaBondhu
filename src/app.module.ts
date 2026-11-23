@@ -12,6 +12,8 @@ import { ListingsModule } from "@/modules/listings/listings.module";
 import { OffersModule } from "@/modules/offers/offers.module";
 import { OrdersModule } from "@/modules/orders/orders.module";
 
+import { PaymentsModule } from "@/modules/payments/payments.module";
+
 @Module({
   imports: [
     ConfigModule.forRoot({
@@ -26,6 +28,7 @@ import { OrdersModule } from "@/modules/orders/orders.module";
     ListingsModule,
     OffersModule,
     OrdersModule,
+    PaymentsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

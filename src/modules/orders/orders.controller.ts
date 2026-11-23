@@ -70,7 +70,8 @@ export class OrdersController {
   @Patch(":id/status")
   @Roles(Role.GROWER, Role.FACTORY)
   @ApiOperation({
-    summary: "Cancel before pickup, schedule pickup, or record collection",
+    summary:
+      "Cancel, schedule pickup, record collection, or complete after payment confirmation",
   })
   @ApiBody({ type: UpdateOrderStatusDto })
   @ApiResponse({

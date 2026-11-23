@@ -44,7 +44,7 @@ const numeric = {
 )
 @Check(
   "CHK_orders_payment_status",
-  "payment_status IN ('PENDING', 'PROCESSING', 'COMPLETED', 'FAILED')",
+  "payment_status IN ('PENDING', 'SUBMITTED', 'CONFIRMED', 'REJECTED')",
 )
 export class Order {
   @PrimaryGeneratedColumn()

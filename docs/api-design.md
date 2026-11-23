@@ -1175,9 +1175,9 @@ Lists return `{ data, total, page, limit, totalPages }`, newest first. Paginatio
 |---|---|---|
 | `ACCEPTED → PICKUP_SCHEDULED` | FACTORY | Required `proposedCollectionDate` as `YYYY-MM-DD` and `collectionPoint`. Optional `pickupNotes` and non-negative `estimatedTransportCostBdt`. |
 | `ACCEPTED → CANCELLED` | GROWER | None |
-| `PICKUP_SCHEDULED → COLLECTED` | FACTORY | Required non-negative `actualCollectedWeightKg` with up to three decimal places |
+| `PICKUP_SCHEDULED → COLLECTED` | FACTORY | Required positive `actualCollectedWeightKg` with up to three decimal places |
 
-Cancellation reopens an eligible listing and leaves closed requests closed. A moderated listing remains unavailable. The listing stays `RESERVED` during pickup and collection. The API supports transitions through `COLLECTED` in Phase 7. Completion requires a future payment confirmation action.
+Cancellation reopens an eligible listing and leaves closed requests closed. A moderated listing remains unavailable. The listing stays `RESERVED` during pickup and collection. The owning factory can complete a collected order after grower payment confirmation.
 
 **Extended Request Body for `PICKUP_SCHEDULED`:**
 
@@ -1214,88 +1214,28 @@ Cancellation reopens an eligible listing and leaves closed requests closed. A mo
 
 ---
 
-### 10.5 Update Payment Status
-
-Planned for the Payments phase.
-
-**`PATCH /orders/:id/payment-status`**
-
-| Property | Value |
-|---|---|
-| Auth | FACTORY |
-| Description | Update the payment status of an order. Only the factory involved in the order can do this. |
-
-**Request Body:**
-
-```json
-{
-  "paymentStatus": "PROCESSING",
-  "paymentMethod": "Bank Transfer",
-  "paymentDate": null,
-  "notes": "Transfer initiated via DBBL."
-}
-```
-
-| Field | Type | Required | Rules |
-|---|---|---|---|
-| `paymentStatus` | enum | Yes | Valid payment status enum value |
-| `paymentMethod` | string | No | Free text |
-| `paymentDate` | string | No | ISO date; set when marking as `COMPLETED` |
-| `notes` | string | No | — |
-
-**Success Response — `200 OK`:** Returns the updated `Order` and `Payment` objects.
-
-**Error Cases:**
-
-| Status | Condition |
-|---|---|
-| `400 Bad Request` | Invalid payment status or transition |
-| `401 Unauthorized` | No token |
-| `403 Forbidden` | Not the factory involved in this order |
-| `404 Not Found` | Order not found |
-| `409 Conflict` | Invalid payment status transition |
-
----
-
 ## 11. Module: Payments
 
-**Base path:** `/payments`
+Every route requires a Bearer JWT. Private order routes are available to the two participants and to admins for read-only oversight. Unrelated users receive `404`.
 
----
+| Method and route | Actor | Request | Success |
+|---|---|---|---|
+| `GET /payments/order/:orderId/amount` | Participants, admin | — | 200 with order ID, exact decimal `amountBdt`, currency and payment status |
+| `POST /payments/order/:orderId/attempts` | Owning factory | `Idempotency-Key` header and method, paymentDate, provider and reference as applicable | 201 with settlement ID, order ID, amount, currency and original attempt |
+| `GET /payments/order/:orderId` | Participants, admin | — | 200 with settlement ID, order ID, amount, currency, creation date and current payment status |
+| `GET /payments/order/:orderId/history` | Participants, admin | `page`, `limit` | 200 with paginated attempts and receipt decisions |
+| `GET /payments/my` | Factory, grower | `page`, `limit` | 200 with own settlements |
+| `GET /admin/payments` | Admin | `page`, `limit` | 200 with settlement summaries |
+| `PATCH /payments/order/:orderId/attempts/:attemptId/confirm` | Owning grower | Empty body | 200 with the confirmed attempt, including on retry |
+| `PATCH /payments/order/:orderId/attempts/:attemptId/reject` | Owning grower | `rejectionReason` (1–1000 characters after trimming) | 200 with the rejected attempt |
 
-### 11.1 Get Payment Record for an Order
+Pagination defaults to page 1 and limit 20, with a maximum limit of 100. Responses include `data`, `total`, `page`, `limit`, and `totalPages`.
 
-**`GET /payments/order/:orderId`**
+Submit a date in `YYYY-MM-DD` format and a key of 1–128 printable non-space ASCII characters. Methods are `CASH`, `BANK_TRANSFER`, and `MOBILE_FINANCIAL_SERVICE`. Bank and mobile submissions require provider and reference. Mobile providers are `BKASH` and `NAGAD`. Cash accepts an optional reference. Provider and reference are trimmed and uppercased. Reusing a key for the same normalized payload returns the original response. Changing the payload under the same key or reusing an external reference for the same method and provider returns `409`, including after rejection.
 
-| Property | Value |
-|---|---|
-| Auth | GROWER, FACTORY, or ADMIN |
-| Description | Get the payment record for a specific order. Access limited to parties involved in the order. |
+Amounts use actual collected weight and the agreed unit price, rounded to two BDT decimal places. Uncollected and zero-payable orders return `409` from the amount and submission endpoints. Invalid payloads return `400`, missing authentication `401`, and wrong roles `403`. Missing settlements or attempts return `404`. Ineligible decision states return `409`.
 
-**Success Response — `200 OK`:**
-
-```json
-{
-  "id": 15,
-  "orderId": 88,
-  "agreedPricePerKg": "28.50",
-  "actualCollectedWeightKg": "342.750",
-  "totalAmountBdt": "9768.38",
-  "paymentStatus": "PENDING",
-  "paymentMethod": null,
-  "paymentDate": null,
-  "notes": null,
-  "createdAt": "2026-11-05T14:00:00.000Z"
-}
-```
-
-**Error Cases:**
-
-| Status | Condition |
-|---|---|
-| `401 Unauthorized` | No token |
-| `403 Forbidden` | User is not a party to this order |
-| `404 Not Found` | No payment record for this order yet |
+Confirmation leaves the order `COLLECTED`. The owning factory completes it with `PATCH /orders/:id/status` and `{"orderStatus":"COMPLETED"}`. The transaction requires `CONFIRMED` payment and marks the listing `SOLD`.
 
 ---
 
@@ -1527,8 +1467,7 @@ Planned for broader admin oversight. Admins can already read an individual order
 | `GET` | `/orders/my` | GROWER / FACTORY | Get own orders |
 | `GET` | `/orders/:id` | Any Auth | Get order by ID |
 | `PATCH` | `/orders/:id/status` | GROWER / FACTORY | Update order status |
-| `PATCH` | `/orders/:id/payment-status` | FACTORY | Update payment status |
-| `GET` | `/payments/order/:orderId` | Any Auth | Get payment record for order |
+| `GET` | `/payments/order/:orderId` | Participants / ADMIN | Get private payment settlement |
 | `GET` | `/admin/users` | ADMIN | List all users |
 | `GET` | `/admin/users/:id` | ADMIN | Get user details |
 | `PATCH` | `/admin/users/:id/verify` | ADMIN | Verify factory account |

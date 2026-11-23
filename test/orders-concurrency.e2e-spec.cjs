@@ -1,3 +1,6 @@
+const {
+  CreatePayments1795390200000,
+} = require("../dist/database/migrations/1795390200000-CreatePayments");
 const { randomUUID } = require("node:crypto");
 const { setTimeout: delay } = require("node:timers/promises");
 const { Test } = require("@nestjs/testing");
@@ -96,6 +99,7 @@ describeRace(
           CreatePriceOffers1795300100000,
           CreateOrderRequestsAndOrders1795390000000,
           AddOrderPickupFields1795390100000,
+          CreatePayments1795390200000,
         ],
       }).initialize();
       const [{ occupied }] = await dataSource.query(
@@ -290,6 +294,87 @@ describeRace(
       });
     });
 
+    it("serializes payment submissions and confirmations and rolls back failed state changes", async () => {
+      const batch = await listing();
+      const incoming = (await submit(buyers[0], batch.id).expect(201)).body;
+      const {
+        order: { id },
+      } = (await accept(incoming.id).expect(200)).body;
+      const change = (body) =>
+        api
+          .patch(`/orders/${id}/status`)
+          .auth(buyers[0].token, bearer)
+          .send(body);
+      await change({
+        orderStatus: "PICKUP_SCHEDULED",
+        proposedCollectionDate: "2099-12-18",
+        collectionPoint: "Tetulia",
+      }).expect(200);
+      await change({
+        orderStatus: "COLLECTED",
+        actualCollectedWeightKg: 12.005,
+      }).expect(200);
+      const path = `/payments/order/${id}`;
+      const pay = (key) =>
+        api
+          .post(path + "/attempts")
+          .auth(buyers[0].token, bearer)
+          .set("Idempotency-Key", key)
+          .send({ method: "CASH", paymentDate: "2026-11-23" });
+      await dataSource.query(
+        "ALTER TABLE orders ADD CONSTRAINT test_block_payment CHECK (payment_status <> 'SUBMITTED')",
+      );
+      try {
+        await pay("recoverable").expect(500);
+        expect(
+          await dataSource.query(
+            "SELECT id FROM payments WHERE order_id = $1",
+            [id],
+          ),
+        ).toEqual([]);
+      } finally {
+        await dataSource.query(
+          "ALTER TABLE orders DROP CONSTRAINT test_block_payment",
+        );
+      }
+      const [winner, loser] = await race(
+        batch.id,
+        () => pay("recoverable"),
+        () => pay("competing"),
+      );
+      expect([winner.status, loser.status]).toEqual([201, 409]);
+      const confirm = () =>
+        api
+          .patch(`${path}/attempts/${winner.body.attempt.id}/confirm`)
+          .auth(growerToken, bearer)
+          .send({});
+      const decisions = await race(batch.id, confirm, confirm);
+      expect(decisions.map((r) => r.status)).toEqual([200, 200]);
+      expect(decisions[0].body).toEqual(decisions[1].body);
+      expect(
+        await dataSource.query(
+          "SELECT decision FROM payment_attempts WHERE payment_id = $1",
+          [winner.body.paymentId],
+        ),
+      ).toEqual([{ decision: "CONFIRMED" }]);
+      await dataSource.query(
+        "ALTER TABLE harvest_listings ADD CONSTRAINT test_block_sale CHECK (status <> 'SOLD')",
+      );
+      try {
+        await change({ orderStatus: "COMPLETED" }).expect(500);
+        expect(
+          await dataSource.manager.findOneByOrFail(Order, { id }),
+        ).toMatchObject({
+          orderStatus: "COLLECTED",
+          paymentStatus: "CONFIRMED",
+        });
+      } finally {
+        await dataSource.query(
+          "ALTER TABLE harvest_listings DROP CONSTRAINT test_block_sale",
+        );
+      }
+      await change({ orderStatus: "COMPLETED" }).expect(200);
+    });
     it("rolls back order creation, reservation, and acceptance after an injected closure failure", async () => {
       const batch = await listing();
       const first = (await submit(buyers[0], batch.id).expect(201)).body;

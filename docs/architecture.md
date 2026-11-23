@@ -256,7 +256,6 @@ ChaBondhu/
         dto/
           create-order.dto.ts
           update-order-status.dto.ts
-          update-payment-status.dto.ts
 
       payments/
         payments.module.ts
@@ -481,7 +480,7 @@ All business logic lives in **service classes**. Controllers never contain condi
 | Hash password before saving | `AuthService` | `register()` |
 | Snapshot the offer price on submission and copy the request quote on acceptance | `OrderRequestsService` | `submit()`, `accept()` |
 | Validate order status transitions | `OrdersService` | `updateOrderStatus()` |
-| Validate payment status transitions | `OrdersService` | `updatePaymentStatus()` |
+| Submit payment and record receipt decisions | `PaymentsService` | `submit()`, `decide()` |
 | Check listing belongs to requesting farmer | `ListingsService` | `create()`, `update()`, `cancel()` |
 | Check offer belongs to requesting factory | `OffersService` | `update()`, `withdraw()` |
 | Check factory is verified before creating offer | `OffersService` | `create()` |
@@ -504,16 +503,18 @@ const VALID_ORDER_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
 };
 ```
 
-Requests have their own statuses. A grower can accept or reject a pending request, and its factory can withdraw it. Acceptance locks the listing first, creates an order, sets the listing to `RESERVED`, and closes competing requests in one transaction. Phase 7 implements transitions through collection. Completion follows confirmed payment in a later phase.
+Requests have their own statuses. A grower can accept or reject a pending request, and its factory can withdraw it. Acceptance locks the listing first, creates an order, sets the listing to `RESERVED`, and closes competing requests in one transaction. The owning factory completes the collected order after grower confirmation. Completion and the listing’s SOLD transition commit together.
 
 ### 9.2 Payment Status Transition Table (Enforced in Service)
 
+Payment writes lock the listing and then the order before loading the settlement and attempt. A failed write rolls back the attempt and the Order payment status together. একই তালিকার পেমেন্ট ও অর্ডারের পরিবর্তন ধারাবাহিকভাবে সম্পন্ন হয়।
+
 ```typescript
-const VALID_PAYMENT_TRANSITIONS: Record<PaymentStatus, PaymentStatus[]> = {
-  [PaymentStatus.PENDING]:    [PaymentStatus.PROCESSING, PaymentStatus.FAILED],
-  [PaymentStatus.PROCESSING]: [PaymentStatus.COMPLETED, PaymentStatus.FAILED],
-  [PaymentStatus.COMPLETED]:  [],   // Terminal
-  [PaymentStatus.FAILED]:     [],   // Terminal
+const VALID_PAYMENT_TRANSITIONS = {
+  PENDING: ["SUBMITTED"],
+  SUBMITTED: ["CONFIRMED", "REJECTED"],
+  REJECTED: ["SUBMITTED"],
+  CONFIRMED: [],
 };
 ```
 
@@ -588,7 +589,7 @@ This serves as the primary tool for testing the API during development, alongsid
 | `FactoryProfilesModule` | `FactoryProfile` | `POST`, `GET /me`, `GET /:id`, `PATCH /me` | CRUD; enforce one-per-user |
 | `OffersModule` | `PriceOffer` | `POST /offers`, `GET /offers`, `GET /offers/my`, `GET /offers/:id`, `PATCH /offers/:id`, `PATCH /offers/:id/withdraw` | Publishing and editing check factory verification. Owner writes lock the offer before checking its state. Public reads apply the expiry cutoff, and an in-process job persists expiry at startup and every minute. |
 | `OrdersModule` | `OrderRequest`, `Order` | `/order-requests`, `/listings/:id/order-requests`, `/orders/my`, `/orders/:id`, `/orders/:id/status` | Verifies ownership and eligibility, reserves listings atomically, and handles cancellation, pickup, and collection |
-| `PaymentsModule` | `Payment` | `GET /order/:orderId` | Retrieve payment record; calculate total |
+| `PaymentsModule` | `Payment`, `PaymentAttempt` | Amount, submission, details, history, receipt decisions, admin oversight | Listing-first transaction locks, exact BDT calculation and audited attempts |
 | `AdminModule` | — | `/admin/users/*`, `/admin/listings`, `/admin/orders` | Cross-module admin queries; verification; deactivation |
 | `CommonModule` | — | — | Guards, decorators, shared enums |
 

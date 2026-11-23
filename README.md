@@ -56,7 +56,7 @@ This repository contains the **backend REST API** developed with **NestJS**, **T
 
 ### Planned Features (Upcoming in Project Roadmap)
 
-- Payment Tracking Records (`PaymentsModule` — Step 12)
+- Payment settlements, receipt decisions, and private attempt history (`PaymentsModule`)
 - Platform Administrative Dashboard (`AdminModule` — Step 13)
 
 ---
@@ -406,6 +406,8 @@ Edits may change `pricePerKg`, `minimumQuantityKg`, `validUntil`, and `notes`. A
 
 These routes require a Bearer JWT. Acceptance creates the order at the submitted quote, reserves the listing, and closes competing pending requests in one transaction. Collection records actual weight while preserving the original estimate and payment status. See the [Orders API](docs/api-design.md#10-module-orders).
 
+Payment routes support a payable amount, submission with an `Idempotency-Key`, private settlement details and attempt history, and grower confirmation or rejection. Admins have read-only oversight. The factory completes the order through its existing status endpoint after confirmation. See the [Payments API](docs/api-design.md#11-module-payments).
+
 ## 🔒 Authentication and Authorization
 
 ### Registration Flow
@@ -446,8 +448,8 @@ ChaBondhu uses role-based access control with three roles:
 | **Factory Profiles** | ✅ Complete | 1:1 factory profile linked to factories, admin verification audit |
 | **Harvest Listings** | ✅ Complete | Marketplace CRUD, filtering, pagination, lifecycle management |
 | **Price Offers** | ✅ Complete | Publishing, browsing, details, factory-owned listing, editing, withdrawal, and automatic expiry are available. |
-| **Procurement Orders** | ✅ Phase 7 | Requests, atomic acceptance, participant reads, cancellation, pickup, and collection are available. Completion awaits payment confirmation. |
-| **Payment Records** | ⏳ Planned | Procurement payment tracking (`PaymentsModule` — Step 12) |
+| **Procurement Orders** | ✅ Phase 7 | Requests, atomic acceptance, participant reads, cancellation, pickup, and collection are available. The owning factory completes after grower payment confirmation. |
+| **Payment Records** | ✅ Phase 8 | Exact BDT amounts, idempotent submission, receipt decisions, history, and admin oversight |
 | **Admin** | 🔄 Partial | Factory verification and decision history are available. Broader dashboard and account moderation remain planned. |
 
 ---

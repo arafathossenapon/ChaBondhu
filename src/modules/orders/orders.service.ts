@@ -15,7 +15,8 @@ import { lockHarvestListing } from "@/modules/listings/lock-harvest-listing";
 import { QueryOrdersDto } from "./dto/query-orders.dto";
 import { UpdateOrderStatusDto } from "./dto/update-order-status.dto";
 import { Order } from "./entities/order.entity";
-import { OrderStatus } from "./order-status";
+import { requirePayableAmount } from "@/modules/payments/payable-amount";
+import { OrderStatus, PaymentStatus } from "./order-status";
 
 const transitions = {
   [OrderStatus.CANCELLED]: { role: Role.GROWER, from: OrderStatus.ACCEPTED },
@@ -23,6 +24,7 @@ const transitions = {
     role: Role.FACTORY,
     from: OrderStatus.ACCEPTED,
   },
+  [OrderStatus.COMPLETED]: { role: Role.FACTORY, from: OrderStatus.COLLECTED },
   [OrderStatus.COLLECTED]: {
     role: Role.FACTORY,
     from: OrderStatus.PICKUP_SCHEDULED,
@@ -129,6 +131,14 @@ export class OrdersService {
           "Order cannot move to the requested status",
         );
       }
+      if (orderStatus === OrderStatus.COMPLETED) {
+        if (order.paymentStatus !== PaymentStatus.CONFIRMED) {
+          throw new ConflictException(
+            "Grower payment confirmation is required",
+          );
+        }
+        await requirePayableAmount(manager, id);
+      }
       await manager.update(Order, id, {
         orderStatus,
         proposedCollectionDate,
@@ -143,6 +153,12 @@ export class OrdersService {
           status: listing.isActive
             ? ListingStatus.ACTIVE
             : ListingStatus.CANCELLED,
+        });
+      }
+      if (orderStatus === OrderStatus.COMPLETED) {
+        // অর্ডার সম্পন্ন হলে একই ট্রানজ্যাকশনে তালিকাটি বিক্রি হয়েছে বলে চিহ্নিত করি।
+        await manager.update(HarvestListing, listing.id, {
+          status: ListingStatus.SOLD,
         });
       }
       return this.toResponse(await query.getOneOrFail());

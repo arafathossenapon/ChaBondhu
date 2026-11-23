@@ -392,19 +392,7 @@ ACCEPTED  → CANCELLED  (farmer cancels before pickup)
 
 ### 9.2 Payment Status State Machine
 
-Payment status is tracked independently of order status.
-
-```
-PENDING → PROCESSING → COMPLETED
-PENDING → FAILED
-```
-
-| Status | Description | Who Sets It |
-|---|---|---|
-| `PENDING` | Payment not yet made | System (default) |
-| `PROCESSING` | Payment has been initiated | Factory |
-| `COMPLETED` | Payment confirmed as received | Factory |
-| `FAILED` | Payment attempt failed | Factory |
+The owning factory submits a full settlement, moving payment from PENDING to SUBMITTED. The owning grower confirms receipt or rejects with a reason. Rejection permits another submission while preserving the original attempt. Admin oversight is read-only. The factory explicitly completes the order after confirmation.
 
 ### 9.3 Agreed Price Rule
 
@@ -451,28 +439,7 @@ The MVP must support basic pickup scheduling so both parties know when and where
 
 ## 11. Payment Tracking
 
-### 11.1 Scope
-
-ChaBondhu tracks payment records and status only. **No real money transfer or payment gateway is integrated.**
-
-### 11.2 Payment Record Fields
-
-| Field | Type | Notes |
-|---|---|---|
-| Order ID | reference | Links to the order |
-| Agreed price per kg | decimal | Copied from order at order creation time |
-| Actual collected weight (kg) | decimal | Entered by factory after collection |
-| Calculated total amount (BDT) | decimal | `agreedPricePerKg × actualCollectedWeight` |
-| Payment status | enum | `PENDING`, `PROCESSING`, `COMPLETED`, `FAILED` |
-| Payment method | string | Optional free-text; e.g. "Bank Transfer", "Cash" |
-| Payment date | date | Optional; set when payment is marked completed |
-| Notes | string | Optional |
-
-### 11.3 Calculation Rule
-
-Total payment amount = `agreedPricePerKg` × `actualCollectedWeightKg`
-
-This calculation must only be performed once the actual collected weight is entered. It must use the agreed price from the order, not the current price offer.
+The factory pays the grower based on actual collected weight multiplied by the agreed price. The backend uses exact decimal arithmetic and requires at least BDT 0.01. Supported methods are cash, bank transfer, and mobile financial services (bKash or Nagad). A rejected external transaction reference cannot be reused for the same method and provider. The MVP supports one full settlement, manual receipt confirmation, and private attempt history.
 
 ---
 
