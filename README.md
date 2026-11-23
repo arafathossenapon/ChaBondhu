@@ -402,11 +402,11 @@ Edits may change `pricePerKg`, `minimumQuantityKg`, `validUntil`, and `notes`. A
 | `PATCH /order-requests/:id/withdraw` | Owning FACTORY | Withdraw a pending request |
 | `GET /orders/my` | GROWER or FACTORY | List orders involving the caller |
 | `GET /orders/:id` | Participant or ADMIN | Read the order and pickup details |
-| `PATCH /orders/:id/status` | Owning GROWER or FACTORY | Cancel before pickup, schedule pickup, or record collection according to role |
+| `PATCH /orders/:id/status` | Owning GROWER or FACTORY | Grower cancels before pickup. Factory schedules pickup, records collection, or completes after payment confirmation. |
 
 These routes require a Bearer JWT. Acceptance creates the order at the submitted quote, reserves the listing, and closes competing pending requests in one transaction. Collection records actual weight while preserving the original estimate and payment status. See the [Orders API](docs/api-design.md#10-module-orders).
 
-Payment routes support a payable amount, submission with an `Idempotency-Key`, private settlement details and attempt history, and grower confirmation or rejection. Admins have read-only oversight. The factory completes the order through its existing status endpoint after confirmation. See the [Payments API](docs/api-design.md#11-module-payments).
+The owning factory submits payment with an `Idempotency-Key`. The owning grower confirms receipt or rejects it with a reason. Both participants can read settlement details and attempt history, and admins have read-only oversight. After confirmation, the factory explicitly completes the order through the existing status endpoint, marking the listing SOLD in the same transaction. See the [Payments API](docs/api-design.md#11-module-payments).
 
 ## 🔒 Authentication and Authorization
 
