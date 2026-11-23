@@ -128,7 +128,7 @@ Factory profiles start as `PENDING`. Signed-in users can see the current verific
 ### 4.1 Registration and Login
 
 - A farmer must be able to register with: full name, email, password, and phone number.
-- Password must be securely hashed (bcrypt) before storage.
+- Password must be securely hashed (Argon2) before storage.
 - After successful login, the system must return a JWT token.
 - The farmer must use this token to access all protected endpoints.
 
@@ -262,10 +262,10 @@ A factory may publish price offers for tea leaves they wish to purchase.
 
 ### 5.8 Updating Collection and Payment Status
 
-- The factory is responsible for updating:
-  - Collection status (e.g., pickup scheduled, leaves collected)
-  - Payment status (e.g., payment pending, payment completed)
-- These are two independent status fields and must not be conflated.
+- The owning factory schedules pickup, records actual collected weight, and submits payment information.
+- The owning grower confirms receipt or rejects the submission with a reason. The factory can resubmit after rejection, and prior attempts remain in the history.
+- After payment is confirmed, the owning factory explicitly completes the order. The listing becomes SOLD in the same transaction.
+- Order status and payment status are tracked separately. Confirming payment leaves the order COLLECTED until the factory completes it.
 
 ---
 
@@ -449,9 +449,9 @@ The factory pays the grower based on actual collected weight multiplied by the a
 
 | Requirement | Implementation |
 |---|---|
-| Passwords must be hashed | bcrypt |
+| Passwords must be hashed | Argon2 |
 | Authentication via token | JWT, returned on login |
-| Token required for all protected routes | `JwtAuthGuard` on protected controllers |
+| Token required for all protected routes | `JwtGuard` on protected controllers |
 | Role-based access control | `RolesGuard` + `@Roles()` decorator |
 | Input validation on all endpoints | NestJS `ValidationPipe` + `class-validator` DTOs |
 | Secrets in environment variables | `.env` file, loaded via `@nestjs/config` |
@@ -498,8 +498,8 @@ This is a high-level description of the main entities. Detailed schemas will be 
 | `Factory` | A factory's profile | Belongs to one `User`; has many `PriceOffer`s |
 | `PriceOffer` | A factory's buying price offer | Belongs to one `Factory`; can have many `OrderRequest`s |
 | `OrderRequest` | A factory's request with a fixed quoted price | Links one harvest listing and one offer; may produce one order |
-| `Order` | A confirmed procurement order | Belongs to one accepted request and listing; may have one future payment record |
-| `PaymentRecord` | Tracks payment status and amounts | Belongs to one `Order` |
+| `Order` | A confirmed procurement order | Belongs to one accepted request and listing; may have one payment settlement with multiple recorded attempts |
+| Payment | Stores the amount for one full settlement | Belongs to one Order and has submission attempts |
 
 ### 13.2 Key Design Decisions
 
