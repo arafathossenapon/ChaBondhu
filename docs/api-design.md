@@ -788,7 +788,7 @@ Validation errors (from `ValidationPipe`) return an array of messages:
 
 **Success Response — `201 Created`:** Returns the created `PriceOffer` with `status: "ACTIVE"`.
 
-The server sets `factoryProfileId` from the signed-in account. The DTO accepts the fields above. Including a listing ID, factory profile ID, or status in the request returns HTTP 400. A harvest listing and an offer will be linked through the future Orders workflow.
+The server sets `factoryProfileId` from the signed-in account. The DTO accepts the fields above. Including a listing ID, factory profile ID, or status in the request returns HTTP 400. An order request links a harvest listing to one of the requesting factory’s own eligible price offers. The factory supplies both IDs in `POST /order-requests`.
 
 **Error Cases:**
 
@@ -1176,6 +1176,7 @@ Lists return `{ data, total, page, limit, totalPages }`, newest first. Paginatio
 | `ACCEPTED → PICKUP_SCHEDULED` | FACTORY | Required `proposedCollectionDate` as `YYYY-MM-DD` and `collectionPoint`. Optional `pickupNotes` and non-negative `estimatedTransportCostBdt`. |
 | `ACCEPTED → CANCELLED` | GROWER | None |
 | `PICKUP_SCHEDULED → COLLECTED` | FACTORY | Required positive `actualCollectedWeightKg` with up to three decimal places |
+| `COLLECTED → COMPLETED` | Owning FACTORY | No additional fields. Payment must be `CONFIRMED`, the listing must be `RESERVED`, and the payable amount must be positive. Completion marks the listing `SOLD` in the same transaction. |
 
 Cancellation reopens an eligible listing and leaves closed requests closed. A moderated listing remains unavailable. The listing stays `RESERVED` during pickup and collection. The owning factory can complete a collected order after grower payment confirmation.
 
