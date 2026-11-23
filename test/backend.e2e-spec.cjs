@@ -1,3 +1,4 @@
+const { CreatePayments1795390200000 } = require("../dist/database/migrations/1795390200000-CreatePayments");
 const { randomUUID } = require("node:crypto");
 const { Test } = require("@nestjs/testing");
 const { getRepositoryToken } = require("@nestjs/typeorm");
@@ -145,6 +146,7 @@ describe("ChaBondhu backend", () => {
     await new CreatePriceOffers1795300100000().up(runner);
     await new CreateOrderRequestsAndOrders1795390000000().up(runner);
     await new AddOrderPickupFields1795390100000().up(runner);
+    await new CreatePayments1795390200000().up(runner);
     const legacyProfile = await runner.manager.findOneByOrFail(FactoryProfile, {
       userId: legacyFactory.id,
     });
@@ -1737,6 +1739,36 @@ describe("ChaBondhu backend", () => {
         collectionPoint: "Tetulia collection point",
         proposedCollectionDate: pickup.proposedCollectionDate,
       });
+      const amountPath = `/payments/order/${order.id}/amount`;
+      await api.get(amountPath).expect(401);
+      await api.get(amountPath).auth(buyerTwo.token, bearer).expect(404);
+      await api.get(amountPath).auth(otherGrowerToken, bearer).expect(404);
+      // Exercise exact half-cent rounding and zero-payable legacy orders.
+      await runner.query(
+        "UPDATE orders SET agreed_price_per_kg = 1, actual_collected_weight_kg = 1.005 WHERE id = $1",
+        [order.id],
+      );
+      for (const token of [buyerOne.token, growerToken, adminToken]) {
+        const response = await api
+          .get(amountPath)
+          .auth(token, bearer)
+          .expect(200);
+        expect(response.body).toEqual({
+          orderId: order.id,
+          amountBdt: "1.01",
+          currency: "BDT",
+          paymentStatus: "PENDING",
+        });
+      }
+      await runner.query(
+        "UPDATE orders SET actual_collected_weight_kg = 0.001 WHERE id = $1",
+        [order.id],
+      );
+      await api.get(amountPath).auth(buyerOne.token, bearer).expect(409);
+      await runner.query(
+        "UPDATE orders SET agreed_price_per_kg = $2, actual_collected_weight_kg = 142.75 WHERE id = $1",
+        [order.id, order.agreedPricePerKg],
+      );
       const growerRead = await api
         .get(`/orders/${order.id}`)
         .auth(growerToken, bearer)

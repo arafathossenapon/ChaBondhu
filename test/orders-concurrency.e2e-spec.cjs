@@ -1,3 +1,4 @@
+const { CreatePayments1795390200000 } = require("../dist/database/migrations/1795390200000-CreatePayments");
 const { randomUUID } = require("node:crypto");
 const { setTimeout: delay } = require("node:timers/promises");
 const { Test } = require("@nestjs/testing");
@@ -96,6 +97,7 @@ describeRace(
           CreatePriceOffers1795300100000,
           CreateOrderRequestsAndOrders1795390000000,
           AddOrderPickupFields1795390100000,
+          CreatePayments1795390200000,
         ],
       }).initialize();
       const [{ occupied }] = await dataSource.query(

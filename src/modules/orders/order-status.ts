@@ -21,7 +21,7 @@ export enum OrderStatus {
 
 export enum PaymentStatus {
   PENDING = "PENDING",
-  PROCESSING = "PROCESSING",
-  COMPLETED = "COMPLETED",
-  FAILED = "FAILED",
+  SUBMITTED = "SUBMITTED",
+  CONFIRMED = "CONFIRMED",
+  REJECTED = "REJECTED",
 }
