@@ -93,15 +93,12 @@ All errors follow a consistent structure returned by NestJS exception filters:
 }
 ```
 
-Validation errors (from `ValidationPipe`) return an array of messages:
+DTO validation failures return HTTP 400 with a generic message from `ValidationPipe`.
 
 ```json
 {
   "statusCode": 400,
-  "message": [
-    "pricePerKg must be a positive number",
-    "validUntil must be a valid date string"
-  ],
+  "message": "Bad Request Payload",
   "error": "Bad Request"
 }
 ```
