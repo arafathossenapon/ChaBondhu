@@ -61,7 +61,7 @@ flowchart TD
     Client["React Frontend / Postman / Swagger UI"]
     NestApp["NestJS Application (main.ts)"]
     GlobalPipe["Global ValidationPipe"]
-    Guards["Guards: JwtAuthGuard + RolesGuard"]
+    Guards["Guards: JwtGuard + RolesGuard"]
     Modules["Feature Modules"]
     Services["Services (Business Logic)"]
     Repos["TypeORM Repositories"]
@@ -195,7 +195,7 @@ ChaBondhu/
       auth/
         auth.module.ts
         auth.controller.ts        ← POST /auth/register, POST /auth/login
-        auth.service.ts           ← register(), login(), validateUser()
+        auth.service.ts           ← register(), login()
         strategies/
           jwt.strategy.ts         ← PassportStrategy(Strategy) using 'jwt'
         dto/
@@ -317,7 +317,7 @@ sequenceDiagram
 ```mermaid
 sequenceDiagram
     participant C as Client
-    participant G as JwtAuthGuard
+    participant G as JwtGuard
     participant RG as RolesGuard
     participant Ctrl as Controller
     participant Svc as Service
@@ -340,7 +340,7 @@ sequenceDiagram
 ### 6.3 Guard Architecture
 
 ```
-JwtAuthGuard           → Verifies JWT; populates req.user
+JwtGuard           → Verifies JWT; populates req.user
   └── JwtStrategy      → Extracts payload; loads user from DB
   
 RolesGuard             → Reads @Roles() decorator; compares with req.user.role
@@ -351,14 +351,14 @@ RolesGuard             → Reads @Roles() decorator; compares with req.user.role
 
 ```typescript
 // Requires any valid JWT:
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtGuard)
 
 // Requires JWT AND a specific role:
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtGuard, RolesGuard)
 @Roles(UserRole.GROWER)
 
 // Requires JWT AND admin role:
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtGuard, RolesGuard)
 @Roles(UserRole.ADMIN)
 ```
 
@@ -378,7 +378,7 @@ A custom `@CurrentUser()` decorator extracts `req.user` and injects it directly 
 
 ```typescript
 @Get('me')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtGuard)
 getProfile(@CurrentUser() user: User) {
   return this.usersService.findById(user.id);
 }
@@ -395,7 +395,7 @@ flowchart TD
     A["Incoming HTTP Request"]
     B["NestJS Router — matches URL and method"]
     C["Middleware (if any — not planned for MVP)"]
-    D["Guards — JwtAuthGuard, RolesGuard"]
+    D["Guards — JwtGuard, RolesGuard"]
     E{"Guard passes?"}
     F["Interceptors (not used in MVP)"]
     G["Pipes — ValidationPipe validates DTO"]
@@ -489,7 +489,7 @@ All business logic lives in **service classes**. Controllers never contain condi
 | Calculate the payable amount using PostgreSQL NUMERIC | Payments amount helper | requirePayableAmount() |
 | Check listing is `ACTIVE` before allowing order | OrderRequestsService | submit(), accept() |
 | Check offer is `ACTIVE` and not expired before allowing order | OrderRequestsService | submit(), accept() |
-| Prevent deactivated users from logging in | `AuthService` | `validateUser()` |
+| Prevent deactivated users from logging in | `AuthService` | `login()` |
 
 ### 9.1 Order Status Transition Table (Enforced in Service)
 
