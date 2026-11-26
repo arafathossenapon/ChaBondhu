@@ -91,3 +91,14 @@ test("rejects an expired token before opening a protected route", async ({
     "The server returned an expired or invalid session.",
   );
 });
+test("rejects a token that the backend cannot authenticate", async ({
+  page,
+}) => {
+  await mockSession(page);
+  await page.route("**/backend/users/me", (route) =>
+    route.fulfill({ status: 401, json: { message: "Unauthorized" } }),
+  );
+  await login(page);
+  await expect(page.getByRole("alert")).toHaveText("Unauthorized");
+  await expect(page).toHaveURL(/\/login$/);
+});
