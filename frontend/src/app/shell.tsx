@@ -12,6 +12,10 @@ const links = [
 
 export function AppShell() {
   const { session, signOut } = useSession();
+  const market = session && <Link to="/marketplace/listings">Marketplace</Link>;
+  const own = session?.account.role === "GROWER" && (
+    <Link to="/grower/listings">My listings</Link>
+  );
   const account = session ? (
     <Link to={roleHome[session.account.role]}>My account</Link>
   ) : (
@@ -35,11 +39,18 @@ export function AppShell() {
         <div className="site-width header-inner">
           <Brand />
           <nav className="desktop-nav" aria-label="Main navigation">
-            {links.map(({ href, label }) => (
-              <a key={href} href={href}>
-                {label}
-              </a>
-            ))}
+            {session ? (
+              <>
+                {market}
+                {own}
+              </>
+            ) : (
+              links.map(({ href, label }) => (
+                <a key={href} href={href}>
+                  {label}
+                </a>
+              ))
+            )}
           </nav>
           <div className="desktop-nav account-links">
             {account}
@@ -64,11 +75,18 @@ export function AppShell() {
                   </Dialog.Close>
                 </div>
                 <nav className="mobile-links" aria-label="Main navigation">
-                  {links.map(({ href, label }) => (
-                    <Dialog.Close key={href} asChild>
-                      <a href={href}>{label}</a>
-                    </Dialog.Close>
-                  ))}
+                  {session ? (
+                    <>
+                      {market && <Dialog.Close asChild>{market}</Dialog.Close>}
+                      {own && <Dialog.Close asChild>{own}</Dialog.Close>}
+                    </>
+                  ) : (
+                    links.map(({ href, label }) => (
+                      <Dialog.Close key={href} asChild>
+                        <a href={href}>{label}</a>
+                      </Dialog.Close>
+                    ))
+                  )}
                   <Dialog.Close asChild>{account}</Dialog.Close>
                   <Dialog.Close asChild>{action}</Dialog.Close>
                 </nav>

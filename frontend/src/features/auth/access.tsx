@@ -19,3 +19,8 @@ export function AccountLanding({ title }: { title: string }) {
     </section>
   );
 }
+
+export function SignedInRoute() {
+  const { session } = useSession();
+  return session ? <Outlet /> : <Navigate to="/login" replace />;
+}

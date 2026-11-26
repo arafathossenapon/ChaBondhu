@@ -1,0 +1,73 @@
+@layer components {
+  .market-banner {
+    @apply bg-tea py-9 text-cream sm:py-12;
+  }
+  .market-banner nav {
+    @apply flex flex-wrap gap-2 text-sm font-semibold;
+  }
+  .market-banner nav a {
+    @apply rounded-full px-3 py-2 hover:bg-white/10;
+  }
+  .market-banner nav a.active {
+    @apply bg-leaf text-ink;
+  }
+  .market-banner h1 {
+    @apply mt-4 text-4xl font-semibold tracking-tight sm:text-5xl;
+  }
+  .market-banner p {
+    @apply mt-3 max-w-2xl text-cream/90;
+  }
+  .market-content {
+    @apply space-y-5 py-7 sm:py-10;
+  }
+  .market-filters {
+    @apply flex flex-wrap items-end gap-3 rounded-2xl border border-ink/15 bg-white p-4;
+  }
+  .market-filters label {
+    @apply grid min-w-0 flex-1 basis-40 gap-1.5 text-sm font-semibold;
+  }
+  .market-filters input,
+  .market-filters select {
+    @apply min-h-11 w-full rounded-xl border border-ink/30 bg-white px-3 font-normal;
+  }
+  .market-toolbar,
+  .market-pagination {
+    @apply flex flex-wrap items-center justify-between gap-3 text-sm font-semibold;
+  }
+  .market-pagination {
+    @apply justify-center;
+  }
+  .market-grid {
+    @apply grid gap-4 sm:grid-cols-2 lg:grid-cols-3;
+  }
+  .market-card {
+    @apply rounded-2xl border border-ink/15 bg-white p-5;
+  }
+  .market-card h2 {
+    @apply text-xl font-semibold tracking-tight;
+  }
+  .listing-card h2 a {
+    @apply text-tea underline-offset-4 hover:underline;
+  }
+  .listing-card > p {
+    @apply mt-2;
+  }
+  .market-badge {
+    @apply inline-flex rounded-full bg-ink/10 px-2.5 py-1 text-xs font-semibold;
+  }
+  .market-badge-active {
+    @apply bg-leaf/65 text-ink;
+  }
+  .market-facts {
+    @apply mt-4 grid grid-cols-2 gap-3 border-t border-ink/10 pt-4;
+  }
+  .market-facts dt {
+    @apply text-xs text-ink/80;
+  }
+  .market-facts dd {
+    @apply text-sm font-semibold break-words;
+  }
+  .market-facts > div:last-child {
+    @apply col-span-2;
+  }
+}

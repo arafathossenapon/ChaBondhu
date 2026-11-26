@@ -1,8 +1,12 @@
-import { createBrowserRouter } from "react-router";
+import { createBrowserRouter, Navigate } from "react-router";
 import { AppShell } from "./shell";
 import { NotFound, RouteLoading } from "./route-states";
 
-import { AccountLanding, RoleRoute } from "../features/auth/access";
+import {
+  AccountLanding,
+  RoleRoute,
+  SignedInRoute,
+} from "../features/auth/access";
 
 export const router = createBrowserRouter([
   {
@@ -35,6 +39,13 @@ export const router = createBrowserRouter([
               return { Component: () => <ProfilePage kind="grower" /> };
             },
           },
+          {
+            path: "listings",
+            lazy: async () => ({
+              Component: (await import("../features/marketplace/listings-page"))
+                .OwnListingsPage,
+            }),
+          },
         ],
       },
       {
@@ -58,7 +69,33 @@ export const router = createBrowserRouter([
           { index: true, element: <AccountLanding title="Admin account" /> },
         ],
       },
+      {
+        path: "marketplace",
+        Component: SignedInRoute,
+        children: [
+          { index: true, Component: NavigateToListings },
+          {
+            path: "listings",
+            lazy: async () => ({
+              Component: (await import("../features/marketplace/listings-page"))
+                .ListingsPage,
+            }),
+          },
+          {
+            path: "listings/:id",
+            lazy: async () => ({
+              Component: (
+                await import("../features/marketplace/listing-detail")
+              ).ListingDetail,
+            }),
+          },
+        ],
+      },
       { path: "*", Component: NotFound },
     ],
   },
 ]);
+
+function NavigateToListings() {
+  return <Navigate to="/marketplace/listings" replace />;
+}
