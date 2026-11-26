@@ -145,3 +145,46 @@
     @apply min-h-[58vh] space-y-5 py-14;
   }
 }
+@layer components {
+  .account-layout {
+    width: min(100% - 2.5rem, 64rem);
+    @apply mx-auto grid items-start gap-7 py-10 md:grid-cols-[1fr_1.15fr] md:gap-12 md:py-16;
+  }
+  .account-intro {
+    @apply rounded-3xl bg-tea p-6 text-cream md:p-9;
+  }
+  .account-intro h1 {
+    @apply text-4xl font-semibold tracking-tight md:text-5xl;
+  }
+  .account-intro p {
+    @apply mt-4 max-w-[37ch] leading-relaxed;
+  }
+  .account-card {
+    @apply space-y-5 rounded-3xl border border-ink/10 bg-white p-5 sm:p-7;
+  }
+  .account-card form {
+    @apply space-y-4;
+  }
+  .account-card a {
+    @apply font-semibold text-tea underline underline-offset-4;
+  }
+  .form-field {
+    @apply grid gap-1.5;
+  }
+  .form-field label {
+    @apply text-sm font-semibold;
+  }
+  .form-field input,
+  .form-field select {
+    @apply min-h-11 w-full rounded-xl border border-ink/30 bg-white px-3 py-2 text-ink;
+  }
+  .form-field [aria-invalid="true"] {
+    @apply border-red-700;
+  }
+  .field-error {
+    @apply text-sm font-medium text-red-800;
+  }
+  .button:disabled {
+    @apply cursor-wait opacity-60;
+  }
+}

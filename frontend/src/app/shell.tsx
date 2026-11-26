@@ -2,12 +2,30 @@ import * as Dialog from "@radix-ui/react-dialog";
 import { Link, Outlet } from "react-router";
 import { Brand } from "../shared/ui/brand";
 
+import { roleHome } from "../features/auth/contracts";
+import { useSession } from "../features/auth/session-context";
+
 const links = [
   { href: "/#growers", label: "For growers" },
   { href: "/#factories", label: "For factories" },
 ];
 
 export function AppShell() {
+  const { session, signOut } = useSession();
+  const account = session ? (
+    <Link to={roleHome[session.account.role]}>My account</Link>
+  ) : (
+    <Link to="/login">Sign in</Link>
+  );
+  const action = session ? (
+    <button className="button button-outline" type="button" onClick={signOut}>
+      Sign out
+    </button>
+  ) : (
+    <Link className="button button-green" to="/register">
+      Get started
+    </Link>
+  );
   return (
     <>
       <a className="skip-link" href="#content">
@@ -24,10 +42,8 @@ export function AppShell() {
             ))}
           </nav>
           <div className="desktop-nav account-links">
-            <Link to="/login">Sign in</Link>
-            <Link className="button button-green" to="/register">
-              Get started <span aria-hidden="true">↗</span>
-            </Link>
+            {account}
+            {action}
           </div>
           <Dialog.Root>
             <Dialog.Trigger className="mobile-trigger button button-outline">
@@ -53,14 +69,8 @@ export function AppShell() {
                       <a href={href}>{label}</a>
                     </Dialog.Close>
                   ))}
-                  <Dialog.Close asChild>
-                    <Link to="/login">Sign in</Link>
-                  </Dialog.Close>
-                  <Dialog.Close asChild>
-                    <Link className="button button-green" to="/register">
-                      Get started
-                    </Link>
-                  </Dialog.Close>
+                  <Dialog.Close asChild>{account}</Dialog.Close>
+                  <Dialog.Close asChild>{action}</Dialog.Close>
                 </nav>
               </Dialog.Content>
             </Dialog.Portal>
