@@ -26,6 +26,7 @@ export function MarketHeader({
           <NavLink end to="/marketplace/listings">
             Harvest listings
           </NavLink>
+          <NavLink to="/marketplace/offers">Factory offers</NavLink>
         </nav>
         <h1>{title}</h1>
         <p>{description}</p>

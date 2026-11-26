@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Link, useParams } from "react-router";
 import { ApiError } from "../../shared/api/api-error";
 import { useSession } from "../auth/session-context";
+import { SameGradeOffers } from "./offers";
 import { validId, type Listing } from "./contracts";
 import { day, kg, LoadingCards, MarketError, MarketHeader, Status } from "./ui";
 
@@ -95,6 +96,9 @@ export function ListingDetail() {
               )}
             </article>
           )
+        )}
+        {listing.isSuccess && !notFound && data?.teaGrade.trim() && (
+          <SameGradeOffers teaGrade={data.teaGrade} />
         )}
       </section>
     </>

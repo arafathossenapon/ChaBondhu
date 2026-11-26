@@ -71,3 +71,12 @@
     @apply col-span-2;
   }
 }
+
+@layer components {
+  .offer-price {
+    @apply text-2xl font-bold tabular-nums text-tea;
+  }
+  .offer-price span {
+    @apply text-sm font-normal;
+  }
+}

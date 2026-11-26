@@ -75,6 +75,20 @@ export const router = createBrowserRouter([
         children: [
           { index: true, Component: NavigateToListings },
           {
+            path: "offers",
+            lazy: async () => ({
+              Component: (await import("../features/marketplace/offers-page"))
+                .OffersPage,
+            }),
+          },
+          {
+            path: "offers/:id",
+            lazy: async () => ({
+              Component: (await import("../features/marketplace/offer-detail"))
+                .OfferDetail,
+            }),
+          },
+          {
             path: "listings",
             lazy: async () => ({
               Component: (await import("../features/marketplace/listings-page"))
