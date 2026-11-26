@@ -19,15 +19,3 @@ export function NotFound() {
     </section>
   );
 }
-
-export function AccountEntry({ title }: { title: string }) {
-  return (
-    <section className="site-width route-state">
-      <h1>{title}</h1>
-      <p>Account access will be available in the next milestone.</p>
-      <Link className="button button-green" to="/">
-        Back to home
-      </Link>
-    </section>
-  );
-}
