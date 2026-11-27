@@ -173,7 +173,7 @@ export function OwnedOffersPage() {
           <>
             <div className="market-filters">
               <label>
-                Offer status
+                Stored offer status
                 <select
                   value={status ?? ""}
                   onChange={(event) =>
@@ -198,6 +198,10 @@ export function OwnedOffersPage() {
                 Refresh
               </button>
             </div>
+            <p className="text-sm text-ink/80">
+              Offers past their expiry date are shown as Expired even before the
+              server updates their stored status.
+            </p>
             {offers.isPending ? (
               <LoadingCards />
             ) : offers.isError ? (

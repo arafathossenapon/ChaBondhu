@@ -123,3 +123,46 @@ test("offer editor preserves authorization errors from the backend", async ({
   await page.getByRole("button", { name: "Save changes" }).click();
   await expect(page.getByRole("alert")).toHaveText("You do not own this offer");
 });
+test("owned offer status filtering and pagination preserve expiry safety", async ({
+  page,
+}) => {
+  await page.route("**/backend/offers/my?*", (route) => {
+    const query = new URL(route.request().url()).searchParams;
+    const pageNumber = Number(query.get("page") ?? 1);
+    const filtered = query.get("status") === "ACTIVE";
+    return route.fulfill({
+      json: {
+        ...paged(
+          pageNumber === 1
+            ? [offer]
+            : [
+                {
+                  ...offer,
+                  id: 43,
+                  teaGrade: "Elapsed batch",
+                  validUntil: "2000-01-01",
+                },
+              ],
+        ),
+        total: filtered ? 2 : 1,
+        page: pageNumber,
+        limit: 1,
+        totalPages: filtered ? 2 : 1,
+      },
+    });
+  });
+  await openOffers(page);
+  await page.getByLabel("Stored offer status").selectOption("ACTIVE");
+  await page.getByRole("link", { name: "Next page" }).click();
+  await expect(page).toHaveURL(/status=ACTIVE&page=2$/);
+  const article = page
+    .getByRole("article")
+    .filter({ hasText: "Elapsed batch" });
+  await expect(article.getByText("Expired", { exact: true })).toBeVisible();
+  await expect(article.getByRole("button", { name: "Edit offer" })).toHaveCount(
+    0,
+  );
+  await expect(
+    article.getByRole("button", { name: "Withdraw offer" }),
+  ).toHaveCount(0);
+});
