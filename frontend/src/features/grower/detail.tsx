@@ -1,3 +1,5 @@
+import { useState } from "react";
+import { WithdrawListing } from "./withdraw-listing";
 import { Link, useLocation, useParams } from "react-router";
 import { LoadingCards, MarketError, Status, day, kg } from "../marketplace/ui";
 import { validId } from "../marketplace/contracts";
@@ -6,6 +8,7 @@ import { canEdit, listingState, useGrowerListings } from "./listings";
 export function GrowerListingDetail() {
   const { id } = useParams();
   const notice: unknown = useLocation().state?.notice;
+  const [withdrawnId, setWithdrawnId] = useState<number>();
   const listings = useGrowerListings();
   const listing = validId(id)
     ? listings.data?.find((entry) => entry.id === Number(id))
@@ -19,7 +22,11 @@ export function GrowerListingDetail() {
         </Link>
       </header>
       <section className="grower-section" aria-label="Listing details">
-        {typeof notice === "string" && <p role="status">{notice}</p>}
+        {withdrawnId !== undefined && withdrawnId === listing?.id ? (
+          <p role="status">Listing withdrawn.</p>
+        ) : (
+          typeof notice === "string" && <p role="status">{notice}</p>
+        )}
         {listings.isPending ? (
           <LoadingCards />
         ) : listings.isError ? (
@@ -78,6 +85,12 @@ export function GrowerListingDetail() {
                 Edit listing
               </Link>
             )}
+            <WithdrawListing
+              key={listing.id}
+              listing={listing}
+              refresh={() => void listings.refetch()}
+              onWithdrawn={() => setWithdrawnId(listing.id)}
+            />
           </article>
         )}
       </section>

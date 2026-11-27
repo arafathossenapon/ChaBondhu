@@ -45,3 +45,9 @@
     @apply grid justify-items-start gap-2 sm:grid-cols-[minmax(0,1fr)_auto_auto] sm:items-center sm:gap-5;
   }
 }
+
+@layer components {
+  .grower-dialog {
+    @apply fixed top-1/2 left-1/2 z-50 w-[min(90vw,30rem)] -translate-x-1/2 -translate-y-1/2 space-y-4 rounded-2xl bg-white p-5 shadow-xl sm:p-7;
+  }
+}
