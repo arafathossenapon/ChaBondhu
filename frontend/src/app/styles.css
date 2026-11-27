@@ -1,5 +1,6 @@
 @import "tailwindcss";
 @import "../features/marketplace/styles.css";
+@import "../features/grower/styles.css";
 
 @theme {
   --color-tea: #215442;

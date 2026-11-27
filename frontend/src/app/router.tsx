@@ -40,11 +40,47 @@ export const router = createBrowserRouter([
             },
           },
           {
-            path: "listings",
             lazy: async () => ({
-              Component: (await import("../features/marketplace/listings-page"))
-                .OwnListingsPage,
+              Component: (await import("../features/grower/dashboard"))
+                .GrowerWorkspace,
             }),
+            children: [
+              {
+                path: "dashboard",
+                lazy: async () => ({
+                  Component: (await import("../features/grower/dashboard"))
+                    .Dashboard,
+                }),
+              },
+              {
+                path: "listings",
+                lazy: async () => ({
+                  Component: (await import("../features/grower/dashboard"))
+                    .ManageListings,
+                }),
+              },
+              {
+                path: "listings/new",
+                lazy: async () => ({
+                  Component: (await import("../features/grower/edit-page"))
+                    .CreateListingPage,
+                }),
+              },
+              {
+                path: "listings/:id/edit",
+                lazy: async () => ({
+                  Component: (await import("../features/grower/edit-page"))
+                    .EditListingPage,
+                }),
+              },
+              {
+                path: "listings/:id",
+                lazy: async () => ({
+                  Component: (await import("../features/grower/detail"))
+                    .GrowerListingDetail,
+                }),
+              },
+            ],
           },
         ],
       },
