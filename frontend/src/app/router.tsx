@@ -60,6 +60,20 @@ export const router = createBrowserRouter([
                 }),
               },
               {
+                path: "orders",
+                lazy: async () => ({
+                  Component: (await import("../features/orders/history"))
+                    .OrderHistoryPage,
+                }),
+              },
+              {
+                path: "orders/:id",
+                lazy: async () => ({
+                  Component: (await import("../features/orders/history"))
+                    .OrderDetailPage,
+                }),
+              },
+              {
                 path: "requests",
                 lazy: async () => ({
                   Component: (await import("../features/orders/requests"))
@@ -114,6 +128,20 @@ export const router = createBrowserRouter([
                 lazy: async () => ({
                   Component: (await import("../features/factory/dashboard"))
                     .FactoryDashboard,
+                }),
+              },
+              {
+                path: "orders",
+                lazy: async () => ({
+                  Component: (await import("../features/orders/history"))
+                    .OrderHistoryPage,
+                }),
+              },
+              {
+                path: "orders/:id",
+                lazy: async () => ({
+                  Component: (await import("../features/orders/history"))
+                    .OrderDetailPage,
                 }),
               },
               {
