@@ -41,11 +41,9 @@ const bangladeshDate = new Intl.DateTimeFormat("sv-SE", {
   dateStyle: "short",
 });
 export const bdt = (amount: number) => currency.format(amount);
-export function isAvailable(offer: Offer) {
-  return (
-    offer.status === "ACTIVE" &&
-    offer.validUntil >= bangladeshDate.format(new Date())
-  );
+export const todayInBangladesh = () => bangladeshDate.format(new Date());
+export function isAvailable(offer: Pick<Offer, "status" | "validUntil">) {
+  return offer.status === "ACTIVE" && offer.validUntil >= todayInBangladesh();
 }
 
 export function useOffers(filters: OfferFilters) {
