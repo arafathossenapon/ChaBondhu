@@ -21,10 +21,16 @@ export function AppShell() {
       to={
         session.account.role === "GROWER"
           ? "/grower/dashboard"
-          : roleHome[session.account.role]
+          : session.account.role === "FACTORY"
+            ? "/factory/dashboard"
+            : roleHome[session.account.role]
       }
     >
-      {session.account.role === "GROWER" ? "Grower dashboard" : "My account"}
+      {session.account.role === "GROWER"
+        ? "Grower dashboard"
+        : session.account.role === "FACTORY"
+          ? "Factory dashboard"
+          : "My account"}
     </Link>
   ) : (
     <Link to="/login">Sign in</Link>

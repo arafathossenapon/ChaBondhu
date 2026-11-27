@@ -4,6 +4,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { ApiError } from "../../shared/api/api-error";
 import { FormField } from "../../shared/ui/form-field";
+import { profileKey, useOwnProfile } from "./own-profile";
 import { useSession } from "../auth/session-context";
 import {
   parseProfile,
@@ -23,20 +24,10 @@ export function ProfilePage({ kind }: { kind: ProfileKind }) {
   const { session, request } = useSession();
   const { path, title, fields } = profileKinds[kind];
   const client = useQueryClient();
-  const key = ["profile", session?.account.id, kind] as const;
+  const key = profileKey(session?.account.id, kind);
   const [editing, setEditing] = useState(false);
   const [notice, setNotice] = useState("");
-  const profile = useQuery({
-    queryKey: key,
-    queryFn: async ({ signal }) => {
-      try {
-        return parseProfile(kind, await request(path + "/me", { signal }));
-      } catch (error) {
-        if (error instanceof ApiError && error.status === 404) return null;
-        throw error;
-      }
-    },
-  });
+  const profile = useOwnProfile(kind);
   const status = profile.data?.status;
   const reviews = useQuery({
     queryKey: [...key, "reviews"],

@@ -96,6 +96,35 @@ export const router = createBrowserRouter([
               return { Component: () => <ProfilePage kind="factory" /> };
             },
           },
+          {
+            lazy: async () => ({
+              Component: (await import("../features/factory/dashboard"))
+                .FactoryWorkspace,
+            }),
+            children: [
+              {
+                path: "dashboard",
+                lazy: async () => ({
+                  Component: (await import("../features/factory/dashboard"))
+                    .FactoryDashboard,
+                }),
+              },
+              {
+                path: "procurement",
+                lazy: async () => ({
+                  Component: (await import("../features/factory/procurement"))
+                    .ProcurementPage,
+                }),
+              },
+              {
+                path: "offers",
+                lazy: async () => ({
+                  Component: (await import("../features/factory/owned-offers"))
+                    .OwnedOffersPage,
+                }),
+              },
+            ],
+          },
         ],
       },
       {
