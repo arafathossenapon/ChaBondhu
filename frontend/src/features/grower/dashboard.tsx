@@ -27,6 +27,7 @@ export function GrowerWorkspace() {
           Overview
         </NavLink>
         <NavLink to="/grower/listings">My listings</NavLink>
+        <NavLink to="/grower/requests">Incoming requests</NavLink>
         <NavLink end to="/grower">
           Grower profile
         </NavLink>

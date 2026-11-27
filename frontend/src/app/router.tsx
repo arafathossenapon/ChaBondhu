@@ -60,6 +60,13 @@ export const router = createBrowserRouter([
                 }),
               },
               {
+                path: "requests",
+                lazy: async () => ({
+                  Component: (await import("../features/orders/requests"))
+                    .GrowerRequestsPage,
+                }),
+              },
+              {
                 path: "listings/new",
                 lazy: async () => ({
                   Component: (await import("../features/grower/edit-page"))
@@ -107,6 +114,13 @@ export const router = createBrowserRouter([
                 lazy: async () => ({
                   Component: (await import("../features/factory/dashboard"))
                     .FactoryDashboard,
+                }),
+              },
+              {
+                path: "requests",
+                lazy: async () => ({
+                  Component: (await import("../features/orders/requests"))
+                    .FactoryRequestsPage,
                 }),
               },
               {

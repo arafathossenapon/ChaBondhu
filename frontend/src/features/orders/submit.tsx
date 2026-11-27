@@ -132,7 +132,10 @@ function RequestForm({ listing, page }: { listing: Listing; page: number }) {
   if (submit.data)
     return (
       <div className="market-card" role="status">
-        Request #{submit.data.id} sent to the grower.
+        Request #{submit.data.id} sent to the grower.{" "}
+        <Link className="underline" to="/factory/requests">
+          View my requests
+        </Link>
       </div>
     );
   if (!active)
