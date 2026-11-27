@@ -127,7 +127,10 @@ function RequestList({
   const accountId = session?.account.id;
   const client = useQueryClient();
   const [decision, setDecision] = useState<{ action: Action; id: number }>();
-  const [feedback, setFeedback] = useState("");
+  const [feedback, setFeedback] = useState<{
+    message: string;
+    orderId?: number;
+  }>();
   const rows = useQuery({
     queryKey: ["orders", accountId, "requests", listingId ?? "my", page],
     queryFn: ({ signal }) =>
@@ -145,7 +148,10 @@ function RequestList({
       }),
     onSuccess: async (result, { action, id }) => {
       const outcome = action === "withdraw" ? "withdrawn" : action + "ed";
-      setFeedback(`Request #${id} ${outcome}.`);
+      setFeedback({
+        message: `Request #${id} ${outcome}.`,
+        orderId: result.order?.id,
+      });
       setDecision(undefined);
       const invalidations = [
         client.invalidateQueries({ queryKey: ["orders", accountId] }),
@@ -166,7 +172,7 @@ function RequestList({
 
   function open(action: Action, id: number) {
     mutation.reset();
-    setFeedback("");
+    setFeedback(undefined);
     setDecision({ action, id });
   }
 
@@ -174,7 +180,15 @@ function RequestList({
     <section className="grower-section" aria-label="Requests">
       {feedback && (
         <p role="status" className="market-card">
-          {feedback}
+          {feedback.message}{" "}
+          {feedback.orderId !== undefined && (
+            <Link
+              className="underline"
+              to={`/grower/orders/${feedback.orderId}`}
+            >
+              View order #{feedback.orderId}
+            </Link>
+          )}
         </p>
       )}
       {rows.isPending ? (
