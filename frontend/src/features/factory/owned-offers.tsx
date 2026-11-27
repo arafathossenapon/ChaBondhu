@@ -1,3 +1,5 @@
+import { useRef, useState } from "react";
+import { OfferDialog, type OfferAction } from "./offer-action";
 import { Link, useSearchParams } from "react-router";
 import { pageNumber } from "../marketplace/contracts";
 import { bdt, isAvailable } from "../marketplace/offers";
@@ -14,7 +16,15 @@ import { type OwnedOffer, useOwnedOffers } from "./data";
 
 const statuses = ["ACTIVE", "EXPIRED", "WITHDRAWN"] as const;
 
-function OfferDetails({ offer }: { offer: OwnedOffer }) {
+function OfferDetails({
+  offer,
+  verified,
+  choose,
+}: {
+  offer: OwnedOffer;
+  verified: boolean;
+  choose: (action: OfferAction, button: HTMLElement) => void;
+}) {
   return (
     <article className="market-card space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -66,12 +76,53 @@ function OfferDetails({ offer }: { offer: OwnedOffer }) {
           )}
         </dl>
       </details>
+      {isAvailable(offer) && (
+        <div className="flex flex-wrap gap-2">
+          {verified && (
+            <button
+              className="button button-green"
+              onClick={(event) =>
+                choose({ mode: "edit", offer }, event.currentTarget)
+              }
+            >
+              Edit offer
+            </button>
+          )}
+          <button
+            className="button button-outline"
+            onClick={(event) =>
+              choose({ mode: "withdraw", offer }, event.currentTarget)
+            }
+          >
+            Withdraw offer
+          </button>
+        </div>
+      )}
     </article>
   );
 }
 
 export function OwnedOffersPage() {
   const profile = useOwnProfile("factory");
+  const [action, setAction] = useState<OfferAction | null>(null);
+  const [notice, setNotice] = useState("");
+  const returnFocus = useRef<HTMLElement | null>(null);
+  const title = useRef<HTMLHeadingElement>(null);
+  const verified = !profile.isError && profile.data?.status === "VERIFIED";
+  function choose(next: OfferAction, button: HTMLElement) {
+    returnFocus.current = button;
+    setNotice("");
+    setAction(next);
+  }
+  function close() {
+    setAction(null);
+    requestAnimationFrame(() =>
+      (returnFocus.current?.isConnected
+        ? returnFocus.current
+        : title.current
+      )?.focus(),
+    );
+  }
   const [search, setSearch] = useSearchParams();
   const status = statuses.find((value) => value === search.get("status"));
   const offers = useOwnedOffers(
@@ -81,10 +132,29 @@ export function OwnedOffersPage() {
   return (
     <>
       <header className="grower-heading">
-        <h1>My offers</h1>
-        <p>Review the offers published by your factory.</p>
+        <h1 ref={title} tabIndex={-1}>
+          My offers
+        </h1>
+        <p>Review and manage the offers published by your factory.</p>
+        {verified && (
+          <button
+            className="button button-leaf"
+            onClick={(event) => choose({ mode: "create" }, event.currentTarget)}
+          >
+            New offer
+          </button>
+        )}
       </header>
       <section className="grower-section" aria-label="Factory-owned offers">
+        {notice && <p role="status">{notice}</p>}
+        {profile.data && !verified && (
+          <p>
+            Factory verification is required to publish or edit offers.{" "}
+            <Link className="underline" to="/factory">
+              Check verification
+            </Link>
+          </p>
+        )}
         {profile.isPending ? (
           <LoadingCards />
         ) : profile.isError ? (
@@ -140,7 +210,12 @@ export function OwnedOffersPage() {
                 {offers.data.data.length ? (
                   <div className="grid gap-4 sm:grid-cols-2">
                     {offers.data.data.map((offer) => (
-                      <OfferDetails key={offer.id} offer={offer} />
+                      <OfferDetails
+                        key={offer.id}
+                        offer={offer}
+                        verified={verified}
+                        choose={choose}
+                      />
                     ))}
                   </div>
                 ) : (
@@ -162,6 +237,24 @@ export function OwnedOffersPage() {
           </>
         )}
       </section>
+      {action && (
+        <OfferDialog
+          action={action}
+          close={close}
+          onSuccess={(message) => {
+            setNotice(message);
+            close();
+          }}
+          allowed={
+            action.mode === "create"
+              ? verified
+              : (action.mode === "withdraw" || verified) &&
+                !!offers.data?.data.some(
+                  (item) => item.id === action.offer.id && isAvailable(item),
+                )
+          }
+        />
+      )}
     </>
   );
 }
