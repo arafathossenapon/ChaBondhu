@@ -17,7 +17,15 @@ export function AppShell() {
     <Link to="/grower/listings">My listings</Link>
   );
   const account = session ? (
-    <Link to={roleHome[session.account.role]}>My account</Link>
+    <Link
+      to={
+        session.account.role === "GROWER"
+          ? "/grower/dashboard"
+          : roleHome[session.account.role]
+      }
+    >
+      {session.account.role === "GROWER" ? "Grower dashboard" : "My account"}
+    </Link>
   ) : (
     <Link to="/login">Sign in</Link>
   );

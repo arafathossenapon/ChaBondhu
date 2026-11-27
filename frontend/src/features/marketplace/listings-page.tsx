@@ -46,7 +46,7 @@ function ListingCard({ listing }: { listing: Listing }) {
   );
 }
 
-export function ListingsPage({ own = false }: { own?: boolean }) {
+export function ListingsPage() {
   const { request, session } = useSession();
   const [params, setParams] = useSearchParams();
   const teaGrade = params.get("teaGrade")?.trim() || undefined;
@@ -56,77 +56,65 @@ export function ListingsPage({ own = false }: { own?: boolean }) {
     queryKey: [
       "marketplace",
       session?.account.id,
-      own ? "own-listings" : "listings",
-      ...(own ? [] : [teaGrade, district, page]),
+      "listings",
+      teaGrade,
+      district,
+      page,
     ],
-    queryFn: async ({ signal }) => {
-      if (own) {
-        const data = await request<Listing[]>("/listings/my", { signal });
-        return { data, total: data.length, page: 1, limit: data.length || 1 };
-      }
-      return request<ListingPage>("/listings", {
+    queryFn: ({ signal }) =>
+      request<ListingPage>("/listings", {
         query: { teaGrade, district, page },
         signal,
-      });
-    },
+      }),
   });
 
   return (
     <>
       <MarketHeader
-        title={own ? "My listings" : "Discover tea harvests"}
-        description={
-          own
-            ? "Review your harvest listings and their current status."
-            : "Find available tea harvests by grade and district."
-        }
+        title="Discover tea harvests"
+        description="Find available tea harvests by grade and district."
       />
       <section
         className="site-width market-content"
         aria-label="Harvest results"
       >
-        {!own && (
-          <form
-            key={params.toString()}
-            className="market-filters"
-            onSubmit={(event) => {
-              event.preventDefault();
-              const values = new FormData(event.currentTarget);
-              const next = new URLSearchParams();
-              for (const field of ["teaGrade", "district"]) {
-                const value = String(values.get(field) ?? "").trim();
-                if (value) next.set(field, value);
-              }
-              setParams(next);
-            }}
-          >
-            <label>
-              Tea grade
-              <input
-                name="teaGrade"
-                defaultValue={teaGrade}
-                placeholder="e.g. CTC"
-              />
-            </label>
-            <label>
-              District
-              <input
-                name="district"
-                defaultValue={district}
-                placeholder="e.g. Panchagarh"
-              />
-            </label>
-            <button className="button button-green">Search harvests</button>
-            {(teaGrade || district) && (
-              <Link
-                className="button button-outline"
-                to="/marketplace/listings"
-              >
-                Clear filters
-              </Link>
-            )}
-          </form>
-        )}
+        <form
+          key={params.toString()}
+          className="market-filters"
+          onSubmit={(event) => {
+            event.preventDefault();
+            const values = new FormData(event.currentTarget);
+            const next = new URLSearchParams();
+            for (const field of ["teaGrade", "district"]) {
+              const value = String(values.get(field) ?? "").trim();
+              if (value) next.set(field, value);
+            }
+            setParams(next);
+          }}
+        >
+          <label>
+            Tea grade
+            <input
+              name="teaGrade"
+              defaultValue={teaGrade}
+              placeholder="e.g. CTC"
+            />
+          </label>
+          <label>
+            District
+            <input
+              name="district"
+              defaultValue={district}
+              placeholder="e.g. Panchagarh"
+            />
+          </label>
+          <button className="button button-green">Search harvests</button>
+          {(teaGrade || district) && (
+            <Link className="button button-outline" to="/marketplace/listings">
+              Clear filters
+            </Link>
+          )}
+        </form>
         <div className="market-toolbar">
           <p aria-live="polite">
             {results.data
@@ -161,31 +149,21 @@ export function ListingsPage({ own = false }: { own?: boolean }) {
             ) : (
               <div className="market-card">
                 <h2>No listings found</h2>
-                <p>
-                  {own
-                    ? "Your harvest listings will appear here."
-                    : "Try a different tea grade or district."}
-                </p>
+                <p>Try a different tea grade or district.</p>
               </div>
             )}
-            {!own && (
-              <Pagination
-                page={results.data.page}
-                totalPages={Math.ceil(results.data.total / results.data.limit)}
-                to={(next) => {
-                  const query = new URLSearchParams(params);
-                  query.set("page", String(next));
-                  return "/marketplace/listings?" + query;
-                }}
-              />
-            )}
+            <Pagination
+              page={results.data.page}
+              totalPages={Math.ceil(results.data.total / results.data.limit)}
+              to={(next) => {
+                const query = new URLSearchParams(params);
+                query.set("page", String(next));
+                return "/marketplace/listings?" + query;
+              }}
+            />
           </>
         )}
       </section>
     </>
   );
-}
-
-export function OwnListingsPage() {
-  return <ListingsPage own />;
 }

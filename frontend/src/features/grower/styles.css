@@ -1,0 +1,47 @@
+@layer components {
+  .grower-workspace {
+    @apply grid gap-5 py-7 lg:grid-cols-[13rem_minmax(0,1fr)] lg:gap-8;
+  }
+  .grower-nav {
+    @apply flex flex-wrap items-start gap-1 rounded-2xl border border-ink/15 bg-white p-2 lg:grid lg:self-start;
+  }
+  .grower-nav a {
+    @apply rounded-xl px-3 py-2.5 text-sm font-semibold hover:bg-cream;
+  }
+  .grower-nav a.active {
+    @apply bg-tea text-white;
+  }
+  .grower-heading {
+    @apply space-y-4 rounded-3xl bg-tea p-6 text-cream sm:p-8;
+  }
+  .grower-heading h1 {
+    @apply text-4xl font-semibold tracking-tight sm:text-5xl;
+  }
+  .grower-heading p {
+    @apply max-w-[52ch] text-cream/90;
+  }
+  .grower-section {
+    @apply space-y-5 py-6;
+  }
+  .grower-section h2 {
+    @apply text-xl font-semibold tracking-tight;
+  }
+  .grower-metrics {
+    @apply grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-4;
+  }
+  .grower-metrics > div {
+    @apply rounded-2xl border border-ink/15 bg-white p-4;
+  }
+  .grower-metrics dt {
+    @apply text-sm font-medium;
+  }
+  .grower-metrics dd {
+    @apply text-3xl font-bold tabular-nums text-tea;
+  }
+  .grower-lists {
+    @apply space-y-3;
+  }
+  .grower-listing {
+    @apply grid justify-items-start gap-2 sm:grid-cols-[minmax(0,1fr)_auto_auto] sm:items-center sm:gap-5;
+  }
+}
