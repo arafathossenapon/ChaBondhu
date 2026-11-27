@@ -110,6 +110,13 @@ export const router = createBrowserRouter([
                 }),
               },
               {
+                path: "requests/new",
+                lazy: async () => ({
+                  Component: (await import("../features/orders/submit"))
+                    .SubmitRequestPage,
+                }),
+              },
+              {
                 path: "procurement",
                 lazy: async () => ({
                   Component: (await import("../features/factory/procurement"))
