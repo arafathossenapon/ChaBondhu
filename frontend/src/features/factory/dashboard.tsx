@@ -14,6 +14,7 @@ export function FactoryWorkspace() {
         <NavLink end to="/factory/dashboard">
           Overview
         </NavLink>
+        <NavLink to="/factory/procurement">Procurement</NavLink>
         <NavLink to="/factory/offers">My offers</NavLink>
         <NavLink end to="/factory">
           Factory profile
@@ -60,8 +61,8 @@ export function FactoryDashboard() {
           <Link className="button button-leaf" to="/factory/offers">
             Manage offers
           </Link>
-          <Link className="button hero-secondary" to="/marketplace/listings">
-            Browse harvests
+          <Link className="button hero-secondary" to="/factory/procurement">
+            Open procurement workspace
           </Link>
         </div>
       </header>
