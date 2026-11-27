@@ -1,10 +1,11 @@
-import { Link, useParams } from "react-router";
+import { Link, useLocation, useParams } from "react-router";
 import { LoadingCards, MarketError, Status, day, kg } from "../marketplace/ui";
 import { validId } from "../marketplace/contracts";
-import { listingState, useGrowerListings } from "./listings";
+import { canEdit, listingState, useGrowerListings } from "./listings";
 
 export function GrowerListingDetail() {
   const { id } = useParams();
+  const notice: unknown = useLocation().state?.notice;
   const listings = useGrowerListings();
   const listing = validId(id)
     ? listings.data?.find((entry) => entry.id === Number(id))
@@ -18,6 +19,7 @@ export function GrowerListingDetail() {
         </Link>
       </header>
       <section className="grower-section" aria-label="Listing details">
+        {typeof notice === "string" && <p role="status">{notice}</p>}
         {listings.isPending ? (
           <LoadingCards />
         ) : listings.isError ? (
@@ -67,6 +69,14 @@ export function GrowerListingDetail() {
                 <h3 className="font-semibold">Notes</h3>
                 <p>{listing.notes}</p>
               </div>
+            )}
+            {canEdit(listing) && (
+              <Link
+                className="button button-green"
+                to={"/grower/listings/" + listing.id + "/edit"}
+              >
+                Edit listing
+              </Link>
             )}
           </article>
         )}

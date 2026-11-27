@@ -76,7 +76,10 @@ export function Dashboard() {
           sold.
         </p>
         <div className="flex flex-wrap gap-3">
-          <Link className="button button-leaf" to="/grower/listings">
+          <Link className="button button-leaf" to="/grower/listings/new">
+            Post a harvest
+          </Link>
+          <Link className="button hero-secondary" to="/grower/listings">
             Manage listings
           </Link>
           <Link className="button hero-secondary" to="/marketplace/listings">
@@ -151,6 +154,9 @@ export function ManageListings() {
       <header className="grower-heading">
         <h1>My listings</h1>
         <p>View your harvest details and track marketplace status.</p>
+        <Link className="button button-leaf" to="/grower/listings/new">
+          Post a harvest
+        </Link>
       </header>
       <section className="grower-section" aria-label="Your harvest listings">
         <div className="market-toolbar">
