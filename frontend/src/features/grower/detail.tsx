@@ -85,6 +85,12 @@ export function GrowerListingDetail() {
                 Edit listing
               </Link>
             )}
+            <Link
+              className="button button-outline"
+              to={`/grower/requests?listing=${listing.id}`}
+            >
+              View order requests
+            </Link>
             <WithdrawListing
               key={listing.id}
               listing={listing}

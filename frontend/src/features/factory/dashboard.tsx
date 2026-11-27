@@ -16,6 +16,8 @@ export function FactoryWorkspace() {
         </NavLink>
         <NavLink to="/factory/procurement">Procurement</NavLink>
         <NavLink to="/factory/offers">My offers</NavLink>
+        <NavLink to="/factory/requests">My requests</NavLink>
+        <NavLink to="/factory/orders">My orders</NavLink>
         <NavLink end to="/factory">
           Factory profile
         </NavLink>

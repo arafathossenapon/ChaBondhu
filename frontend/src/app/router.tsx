@@ -60,6 +60,27 @@ export const router = createBrowserRouter([
                 }),
               },
               {
+                path: "orders",
+                lazy: async () => ({
+                  Component: (await import("../features/orders/history"))
+                    .OrderHistoryPage,
+                }),
+              },
+              {
+                path: "orders/:id",
+                lazy: async () => ({
+                  Component: (await import("../features/orders/history"))
+                    .OrderDetailPage,
+                }),
+              },
+              {
+                path: "requests",
+                lazy: async () => ({
+                  Component: (await import("../features/orders/requests"))
+                    .GrowerRequestsPage,
+                }),
+              },
+              {
                 path: "listings/new",
                 lazy: async () => ({
                   Component: (await import("../features/grower/edit-page"))
@@ -107,6 +128,34 @@ export const router = createBrowserRouter([
                 lazy: async () => ({
                   Component: (await import("../features/factory/dashboard"))
                     .FactoryDashboard,
+                }),
+              },
+              {
+                path: "orders",
+                lazy: async () => ({
+                  Component: (await import("../features/orders/history"))
+                    .OrderHistoryPage,
+                }),
+              },
+              {
+                path: "orders/:id",
+                lazy: async () => ({
+                  Component: (await import("../features/orders/history"))
+                    .OrderDetailPage,
+                }),
+              },
+              {
+                path: "requests",
+                lazy: async () => ({
+                  Component: (await import("../features/orders/requests"))
+                    .FactoryRequestsPage,
+                }),
+              },
+              {
+                path: "requests/new",
+                lazy: async () => ({
+                  Component: (await import("../features/orders/submit"))
+                    .SubmitRequestPage,
                 }),
               },
               {
