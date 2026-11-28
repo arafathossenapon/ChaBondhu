@@ -1,3 +1,4 @@
+import { Settlement } from "../payments/settlement";
 import { PickupDetails } from "./pickup";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useParams, useSearchParams } from "react-router";
@@ -186,16 +187,15 @@ export function OrderDetailPage() {
                   <dt>Estimated harvest</dt>
                   <dd>{kg(order.data.estimatedQuantityKg)}</dd>
                 </div>
-                <div>
-                  <dt>Payment status</dt>
-                  <dd>
-                    <Status status={order.data.paymentStatus} />
-                  </dd>
-                </div>
               </dl>
             </article>
             <PickupDetails
               key={order.data.id}
+              order={order.data}
+              detailKey={detailKey}
+            />
+            <Settlement
+              key={"payment-" + order.data.id}
               order={order.data}
               detailKey={detailKey}
             />
