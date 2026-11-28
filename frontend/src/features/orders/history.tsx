@@ -1,3 +1,4 @@
+import { PickupDetails } from "./pickup";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useParams, useSearchParams } from "react-router";
 import { useSession } from "../auth/session-context";
@@ -13,7 +14,7 @@ import {
   Status,
 } from "../marketplace/ui";
 
-type Order = {
+export type Order = {
   id: number;
   orderRequestId: number;
   priceOfferId: number;
@@ -112,8 +113,9 @@ export function OrderDetailPage() {
   const { id } = useParams();
   const { session, request } = useSession();
   const factory = session?.account.role === "FACTORY";
+  const detailKey = ["orders", session?.account.id, "detail", id] as const;
   const order = useQuery({
-    queryKey: ["orders", session?.account.id, "detail", id],
+    queryKey: detailKey,
     enabled: validId(id),
     queryFn: ({ signal }) => request<Order>("/orders/" + id, { signal }),
   });
@@ -139,88 +141,65 @@ export function OrderDetailPage() {
         ) : order.isError ? (
           <MarketError error={order.error} retry={() => void order.refetch()} />
         ) : (
-          <article className="market-card space-y-4">
-            <div className="flex flex-wrap items-center gap-3">
-              <h2>{data?.harvestListing.teaGrade}</h2>
-              <Status status={orderLabel(order.data.orderStatus)} />
-            </div>
-            <dl className="market-facts">
-              <div>
-                <dt>Harvest listing</dt>
-                <dd>#{order.data.harvestListing.id}</dd>
+          <>
+            <article className="market-card space-y-4">
+              <div className="flex flex-wrap items-center gap-3">
+                <h2>{data?.harvestListing.teaGrade}</h2>
+                <Status status={orderLabel(order.data.orderStatus)} />
               </div>
-              <div>
-                <dt>Order request</dt>
-                <dd>#{order.data.orderRequestId}</dd>
-              </div>
-              <div>
-                <dt>Price offer</dt>
-                <dd>#{order.data.priceOfferId}</dd>
-              </div>
-              <div>
-                <dt>Grower</dt>
-                <dd>
-                  {order.data.farmerProfile.gardenName} ·{" "}
-                  {order.data.farmerProfile.district}
-                </dd>
-              </div>
-              <div>
-                <dt>Factory</dt>
-                <dd>
-                  {order.data.factoryProfile.factoryName} ·{" "}
-                  {order.data.factoryProfile.district}
-                </dd>
-              </div>
-              <div>
-                <dt>Created</dt>
-                <dd>{day(order.data.createdAt)}</dd>
-              </div>
-              <div>
-                <dt>Agreed price</dt>
-                <dd>{bdt(order.data.agreedPricePerKg)} / kg</dd>
-              </div>
-              <div>
-                <dt>Estimated harvest</dt>
-                <dd>{kg(order.data.estimatedQuantityKg)}</dd>
-              </div>
-              {order.data.actualCollectedWeightKg !== null && (
+              <dl className="market-facts">
                 <div>
-                  <dt>Actual collected weight</dt>
-                  <dd>{kg(order.data.actualCollectedWeightKg)}</dd>
+                  <dt>Harvest listing</dt>
+                  <dd>#{order.data.harvestListing.id}</dd>
                 </div>
-              )}
-              {order.data.proposedCollectionDate && (
                 <div>
-                  <dt>Proposed collection</dt>
-                  <dd>{day(order.data.proposedCollectionDate)}</dd>
+                  <dt>Order request</dt>
+                  <dd>#{order.data.orderRequestId}</dd>
                 </div>
-              )}
-              {order.data.collectionPoint && (
                 <div>
-                  <dt>Collection point</dt>
-                  <dd>{order.data.collectionPoint}</dd>
+                  <dt>Price offer</dt>
+                  <dd>#{order.data.priceOfferId}</dd>
                 </div>
-              )}
-              {order.data.estimatedTransportCostBdt !== null && (
                 <div>
-                  <dt>Estimated transport</dt>
-                  <dd>{bdt(order.data.estimatedTransportCostBdt)}</dd>
+                  <dt>Grower</dt>
+                  <dd>
+                    {order.data.farmerProfile.gardenName} ·{" "}
+                    {order.data.farmerProfile.district}
+                  </dd>
                 </div>
-              )}
-              {order.data.pickupNotes && (
                 <div>
-                  <dt>Pickup notes</dt>
-                  <dd>{order.data.pickupNotes}</dd>
+                  <dt>Factory</dt>
+                  <dd>
+                    {order.data.factoryProfile.factoryName} ·{" "}
+                    {order.data.factoryProfile.district}
+                  </dd>
                 </div>
-              )}
-              <div>
-                <dt>Payment status</dt>
-                <dd>
-                  <Status status={order.data.paymentStatus} />
-                </dd>
-              </div>
-            </dl>
-          </article>
+                <div>
+                  <dt>Created</dt>
+                  <dd>{day(order.data.createdAt)}</dd>
+                </div>
+                <div>
+                  <dt>Agreed price</dt>
+                  <dd>{bdt(order.data.agreedPricePerKg)} / kg</dd>
+                </div>
+                <div>
+                  <dt>Estimated harvest</dt>
+                  <dd>{kg(order.data.estimatedQuantityKg)}</dd>
+                </div>
+                <div>
+                  <dt>Payment status</dt>
+                  <dd>
+                    <Status status={order.data.paymentStatus} />
+                  </dd>
+                </div>
+              </dl>
+            </article>
+            <PickupDetails
+              key={order.data.id}
+              order={order.data}
+              detailKey={detailKey}
+            />
+          </>
         )}
       </section>
     </>
