@@ -319,3 +319,38 @@ test("payment loading, forbidden history, and unavailable amount remain distinct
     page.getByRole("button", { name: "Submit payment details" }),
   ).toHaveCount(0);
 });
+test("a lost response after the server commits reconciles without another submission", async ({
+  page,
+}) => {
+  await factoryLogin(page);
+  const state = {
+    paymentStatus: "PENDING",
+    orderStatus: "COLLECTED",
+    attempts: [] as unknown[],
+  };
+  await setup(page, state);
+  let posts = 0;
+  await page.route(base + "/attempts", (route) => {
+    posts++;
+    state.paymentStatus = "SUBMITTED";
+    state.attempts = [attempt];
+    return route.abort("failed");
+  });
+  await openOrder(page, "factory");
+  await page.getByRole("button", { name: "Submit payment details" }).click();
+  const dialog = page.getByRole("dialog");
+  await dialog.getByLabel("Payment date").fill(paymentDate);
+  await dialog.getByRole("button", { name: "Review submission" }).click();
+  await dialog.getByRole("button", { name: "Confirm submission" }).click();
+  await expect(
+    panel(page).getByRole("heading", { name: "Attempt #8" }),
+  ).toBeVisible();
+  await expect(
+    panel(page).getByText(/submission response was interrupted/),
+  ).toBeVisible();
+  await expect(dialog).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: "Submit payment details" }),
+  ).toHaveCount(0);
+  expect(posts).toBe(1);
+});

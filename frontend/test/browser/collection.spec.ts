@@ -84,8 +84,14 @@ test("factory records exact measured weight once and refreshes the order", async
   await expect(dialog.getByRole("button", { name: "Saving…" })).toBeDisabled();
   release();
   await expect(page.getByText("Collection recorded.")).toBeVisible();
-  await expect(page.getByText("125.5 kg", { exact: true })).toBeVisible();
-  await expect(page.getByText("138.125 kg", { exact: true })).toBeVisible();
+  await expect(
+    page.getByRole("article").getByText("125.5 kg", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page
+      .getByRole("region", { name: "Pickup and collection" })
+      .getByText("138.125 kg", { exact: true }),
+  ).toBeVisible();
   await expect(
     page.getByRole("button", { name: "Record collection" }),
   ).toHaveCount(0);
@@ -117,10 +123,16 @@ test("a stale collection action refreshes after conflict and keeps server feedba
   await page.getByRole("button", { name: "Review collected weight" }).click();
   await page.getByRole("button", { name: "Confirm collection" }).click();
   await expect(page.getByRole("dialog")).toHaveCount(0);
-  await expect(page.getByRole("alert")).toHaveText(
-    "Order cannot move to the requested status",
-  );
-  await expect(page.getByText("1 kg", { exact: true })).toBeVisible();
+  await expect(
+    page
+      .getByRole("region", { name: "Pickup and collection" })
+      .getByRole("alert"),
+  ).toHaveText("Order cannot move to the requested status");
+  await expect(
+    page
+      .getByRole("region", { name: "Pickup and collection" })
+      .getByText("1 kg", { exact: true }),
+  ).toBeVisible();
 });
 
 test("unavailable order shows an error and never exposes a factory write action", async ({
