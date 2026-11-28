@@ -1,3 +1,4 @@
+import { SettlementActions } from "./settlement-actions";
 import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { useSession } from "../auth/session-context";
@@ -58,7 +59,9 @@ export function Settlement({
   return (
     <section className="market-card space-y-4" aria-label="Payment settlement">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h2>Payment settlement</h2>
+        <h2 id="settlement-heading" tabIndex={-1}>
+          Payment settlement
+        </h2>
         <Status status={status} />
       </div>
       {notice && <p role="status">{notice}</p>}
@@ -123,6 +126,25 @@ export function Settlement({
                 payable={amount.data}
                 refresh={refresh}
                 notify={setNotice}
+              />
+            )}
+          {session?.account.role === "FACTORY" &&
+            order.orderStatus === "COLLECTED" &&
+            amount.data?.paymentStatus === "CONFIRMED" &&
+            order.paymentStatus === "CONFIRMED" && (
+              <SettlementActions
+                mode="completion"
+                payable={amount.data}
+                notify={setNotice}
+                refresh={async () => {
+                  const [fresh] = await Promise.all([
+                    refresh(),
+                    client.invalidateQueries({
+                      queryKey: ["marketplace", session.account.id],
+                    }),
+                  ]);
+                  return fresh;
+                }}
               />
             )}
           <h3 className="font-semibold">Payment attempt history</h3>
@@ -194,6 +216,19 @@ export function Settlement({
                       </div>
                     )}
                   </dl>
+                  {session?.account.role === "GROWER" &&
+                    order.orderStatus === "COLLECTED" &&
+                    order.paymentStatus === "SUBMITTED" &&
+                    amount.data?.paymentStatus === "SUBMITTED" &&
+                    attempt.decision === null && (
+                      <SettlementActions
+                        mode="receipt"
+                        attempt={attempt}
+                        payable={amount.data}
+                        refresh={refresh}
+                        notify={setNotice}
+                      />
+                    )}
                 </article>
               ))}
               {history.data && (
