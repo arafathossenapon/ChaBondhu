@@ -1,3 +1,9 @@
+import { useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
+import { useSession } from "../auth/session-context";
+import type { DetailKey } from "../orders/pickup-transition";
+import { SubmitPayment } from "./submit-payment";
+import { paymentKey } from "./data";
 import { useSearchParams } from "react-router";
 import { ApiError } from "../../shared/api/api-error";
 import { pageNumber } from "../marketplace/contracts";
@@ -18,7 +24,32 @@ import {
   useSettlement,
 } from "./data";
 
-export function Settlement({ order }: { order: Order }) {
+export function Settlement({
+  order,
+  detailKey,
+}: {
+  order: Order;
+  detailKey: DetailKey;
+}) {
+  const client = useQueryClient();
+  const { session } = useSession();
+  const [notice, setNotice] = useState("");
+  async function refresh() {
+    const results = await Promise.allSettled([
+      client.invalidateQueries(
+        { queryKey: paymentKey(session?.account.id, order.id) },
+        { throwOnError: true },
+      ),
+      client.invalidateQueries({
+        queryKey: ["orders", session?.account.id, "history"],
+      }),
+      client.invalidateQueries(
+        { queryKey: detailKey, exact: true },
+        { throwOnError: true },
+      ),
+    ]);
+    return results.every((result) => result.status === "fulfilled");
+  }
   const [params] = useSearchParams();
   const page = Math.min(pageNumber(params.get("paymentPage")), 1000000);
   const { eligible, amount, history } = useSettlement(order, page);
@@ -30,6 +61,7 @@ export function Settlement({ order }: { order: Order }) {
         <h2>Payment settlement</h2>
         <Status status={status} />
       </div>
+      {notice && <p role="status">{notice}</p>}
       {!eligible ? (
         <p>
           {order.orderStatus === "CANCELLED"
@@ -81,6 +113,18 @@ export function Settlement({ order }: { order: Order }) {
               />
             ))
           )}
+          {session?.account.role === "FACTORY" &&
+            order.orderStatus === "COLLECTED" &&
+            amount.data &&
+            (order.paymentStatus === "PENDING" ||
+              order.paymentStatus === "REJECTED") &&
+            (status === "PENDING" || status === "REJECTED") && (
+              <SubmitPayment
+                payable={amount.data}
+                refresh={refresh}
+                notify={setNotice}
+              />
+            )}
           <h3 className="font-semibold">Payment attempt history</h3>
           {history.isPending ? (
             <LoadingCards />

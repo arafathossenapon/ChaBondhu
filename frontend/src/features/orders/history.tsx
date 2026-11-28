@@ -194,7 +194,11 @@ export function OrderDetailPage() {
               order={order.data}
               detailKey={detailKey}
             />
-            <Settlement key={"payment-" + order.data.id} order={order.data} />
+            <Settlement
+              key={"payment-" + order.data.id}
+              order={order.data}
+              detailKey={detailKey}
+            />
           </>
         )}
       </section>
