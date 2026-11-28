@@ -1,15 +1,19 @@
 import * as Dialog from "@radix-ui/react-dialog";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useRef, useState } from "react";
+import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
-import { ApiError } from "../../shared/api/api-error";
 import { FormField } from "../../shared/ui/form-field";
 import { useSession } from "../auth/session-context";
 import { bdt, todayInBangladesh } from "../marketplace/offers";
 import { day, kg } from "../marketplace/ui";
 import type { Order } from "./history";
+import { RecordCollection } from "./collection-action";
+import {
+  usePickupTransition,
+  type DetailKey,
+  type PickupActionProps,
+} from "./pickup-transition";
 
 const pickupSchema = z.object({
   proposedCollectionDate: z.iso
@@ -39,15 +43,17 @@ export function PickupDetails({
   detailKey,
 }: {
   order: Order;
-  detailKey: readonly [
-    "orders",
-    number | undefined,
-    "detail",
-    string | undefined,
-  ];
+  detailKey: DetailKey;
 }) {
   const { session } = useSession();
   const [notice, setNotice] = useState("");
+  const [conflict, setConflict] = useState<{
+    status: Order["orderStatus"];
+    message: string;
+  }>();
+  const factory = session?.account.role === "FACTORY";
+  const onConflict = (message: string) =>
+    setConflict({ status: order.orderStatus, message });
   return (
     <section
       className="market-card space-y-4"
@@ -55,6 +61,11 @@ export function PickupDetails({
     >
       <h2>Pickup and collection</h2>
       {notice && <p role="status">{notice}</p>}
+      {conflict && conflict.status !== order.orderStatus && (
+        <p role="alert" className="field-error">
+          {conflict.message}
+        </p>
+      )}
       <dl className="market-facts">
         <div>
           <dt>Scheduled pickup date</dt>
@@ -93,30 +104,35 @@ export function PickupDetails({
           </dd>
         </div>
       </dl>
-      {session?.account.role === "FACTORY" &&
-        order.orderStatus === "ACCEPTED" && (
-          <SchedulePickup
-            order={order}
-            detailKey={detailKey}
-            onSaved={() => setNotice("Pickup scheduled.")}
-          />
-        )}
+      {factory && order.orderStatus === "ACCEPTED" && (
+        <SchedulePickup
+          order={order}
+          detailKey={detailKey}
+          onSaved={() => {
+            setConflict(undefined);
+            setNotice("Pickup scheduled.");
+          }}
+          onConflict={onConflict}
+        />
+      )}
+      {factory && order.orderStatus === "PICKUP_SCHEDULED" && (
+        <RecordCollection
+          order={order}
+          detailKey={detailKey}
+          onSaved={() => {
+            setConflict(undefined);
+            setNotice("Collection recorded.");
+          }}
+          onConflict={onConflict}
+        />
+      )}
     </section>
   );
 }
 
-function SchedulePickup({
-  order,
-  detailKey,
-  onSaved,
-}: {
-  order: Order;
-  detailKey: Parameters<typeof PickupDetails>[0]["detailKey"];
-  onSaved: () => void;
-}) {
-  const { request } = useSession();
-  const queryClient = useQueryClient();
-  const busy = useRef(false);
+function SchedulePickup(props: PickupActionProps) {
+  const { order } = props;
+  const { mutation: save, submit, busy } = usePickupTransition(props);
   const [review, setReview] = useState<PickupValues>();
   const [editing, setEditing] = useState(false);
   const form = useForm<PickupValues>({
@@ -129,47 +145,6 @@ function SchedulePickup({
     },
   });
   const errors = form.formState.errors;
-  const save = useMutation({
-    mutationFn: (values: PickupValues) =>
-      request<Order>(`/orders/${order.id}/status`, {
-        method: "PATCH",
-        body: {
-          orderStatus: "PICKUP_SCHEDULED",
-          proposedCollectionDate: values.proposedCollectionDate,
-          collectionPoint: values.collectionPoint,
-          pickupNotes: values.pickupNotes || undefined,
-          estimatedTransportCostBdt:
-            values.estimatedTransportCostBdt === ""
-              ? undefined
-              : Number(values.estimatedTransportCostBdt),
-        },
-      }),
-    onSuccess: async (updated) => {
-      onSaved();
-      await queryClient.cancelQueries({ queryKey: detailKey, exact: true });
-      queryClient.setQueryData(detailKey, updated);
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: detailKey, exact: true }),
-        queryClient.invalidateQueries({
-          queryKey: ["orders", detailKey[1], "history"],
-        }),
-      ]);
-    },
-    onError: (error) => {
-      if (
-        error instanceof ApiError &&
-        [403, 404, 409].includes(error.status ?? 0)
-      ) {
-        void queryClient.invalidateQueries({
-          queryKey: detailKey,
-          exact: true,
-        });
-      }
-    },
-    onSettled: () => {
-      busy.current = false;
-    },
-  });
 
   return (
     <Dialog.Root
@@ -248,9 +223,16 @@ function SchedulePickup({
                   className="button button-leaf"
                   disabled={save.isPending}
                   onClick={() => {
-                    if (busy.current) return;
-                    busy.current = true;
-                    save.mutate(review);
+                    submit({
+                      orderStatus: "PICKUP_SCHEDULED",
+                      proposedCollectionDate: review.proposedCollectionDate,
+                      collectionPoint: review.collectionPoint,
+                      pickupNotes: review.pickupNotes || undefined,
+                      estimatedTransportCostBdt:
+                        review.estimatedTransportCostBdt === ""
+                          ? undefined
+                          : Number(review.estimatedTransportCostBdt),
+                    });
                   }}
                 >
                   {save.isPending ? "Saving…" : "Confirm pickup"}
